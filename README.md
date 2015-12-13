@@ -19,8 +19,9 @@ It was intended for separating episodes of TV series into single files with foll
 
 If you know, what you are doing, you can tweak the options used for Handbrake
 
-# optimize_videos.sh
+# optimize_mkv.sh
 Look for files with "mkv" extension in current folder.
-Use ffmpeg to convert it into a more optimized (H264) codec.
+Or give a list of files.
+Use ffmpeg to convert it into a more optimized (eg. H264) codec.
 All audio tracks are copied as they are.
 Only video will be optimized
