@@ -25,3 +25,8 @@ Or give a list of files.
 Use ffmpeg to convert it into a more optimized (eg. H264) codec.
 All audio tracks are copied as they are.
 Only video will be optimized
+
+There are two paramters to control the output (size):
+- CRF: compression factor (default 23)
+- VCODEC: codec for video (default libx265) 
+Change the script or set those environment variables to a different value
