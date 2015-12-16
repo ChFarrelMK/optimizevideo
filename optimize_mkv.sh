@@ -25,11 +25,12 @@
 #
 
 # set defaults
-[ "${CRF}" = "" ] && CRF="23"
-[ "${VCODEC}" = "" ] && VCODEC="h264"
+[ "${CRF}" = "" ] && CRF="20"
+[ "${VCODEC}" = "" ] && VCODEC="libx265"
 
-argCODEC=" -c:v ${VCODEC}"
-argCRF=" -crf ${CRF}"
+# who am I
+myself1=${0##*/}
+myself=${myself1%.*}
 
 declare -a FILES
 
@@ -127,6 +128,16 @@ do
         LogMessage NoTS NL "file exists. Skipping it"
         continue
     fi
+
+    # read existing config file for current folder
+    if [ -e .${myself}.conf ]
+    then
+        . .${myself}.conf
+    fi
+
+    # set parameters
+    argCODEC=" -c:v ${VCODEC}"
+    argCRF=" -crf ${CRF}"
 
     echo "Command: ffmpeg -i "${FILE}" -map 0 ${argCRF} ${argCODEC} -c:a copy "${workFILE}" >"${workFILE%.*}.log" 2>&1" >"${workFILE%.*}.log"
     ffmpeg -i "${FILE}" -map 0 ${argCRF} ${argCODEC} -c:a copy "${workFILE}" >>"${workFILE%.*}.log" 2>&1
