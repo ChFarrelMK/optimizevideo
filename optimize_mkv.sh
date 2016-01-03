@@ -25,39 +25,14 @@
 #
 
 # set defaults
-[ "${CRF}" = "" ] && CRF="20"
-[ "${VCODEC}" = "" ] && VCODEC="libx265"
+[ "${CRF}" = "" ] && defaultCRF="20"
+[ "${VCODEC}" = "" ] && defaultVCODEC="libx265"
 
 # who am I
 myself1=${0##*/}
 myself=${myself1%.*}
 
 declare -a FILES
-
-if [ "$1" != "" ]
-then
-    i=1
-    while [ "${1}" != "" ]
-    do
-        X="${1}"
-        shift
-        if [[ -e "${X}" && -s "${X}" && -r "${X}" ]]
-        then
-            FILES[$i]="${X}"
-            (( i = i + 1 ))
-        fi
-    done
-else
-    i=1
-    for X in *.mkv
-    do
-        if [[ -e "${X}" && -s "${X}" && -r "${X}" ]]
-        then
-            FILES[$i]="${X}"
-            (( i = i + 1 ))
-        fi
-    done
-fi
 
 function renameFile {
     chmod 664 "${workFILE}"
@@ -93,13 +68,83 @@ function LogMessage {
     fi
 }
 
+function optimizeSize {
+    value=$1
+    if [ ${value} -lt 1024 ]
+    then
+        ret="${value}b"
+    elif [ ${value} -lt 1048576 ]
+    then
+        (( re = value / 1024 ))
+        ret="${re}k"
+    elif [ ${value} -lt 1073741824 ]
+    then
+        (( re = value / 1024 / 1024 ))
+        ret="${re}m"
+    elif [ ${value} -lt 1099511627776 ]
+    then
+        (( re = value / 1024 / 1024 / 1024 ))
+        ret="${re}g"
+    elif [ ${value} -lt 1125899906842624 ]
+    then
+        (( re = value / 1024 / 1024 / 1024 / 1024 ))
+        ret="${re}t"
+    elif [ ${value} -lt 1152921504606846976 ]
+    then
+        (( re = value / 1024 / 1024 / 1024 / 1024 / 1024 ))
+        ret="${re}p"
+    elif [ ${value} -lt 1180591620717411303424 ]
+    then
+        (( re = value / 1024 / 1024 / 1024 / 1024 / 1024 / 1024 ))
+        ret="${re}e"
+    fi
+
+    echo $ret
+}
+
+if [ "$1" != "" ]
+then
+    i=1
+    while [ "${1}" != "" ]
+    do
+        X="${1}"
+        shift
+        if [[ -e "${X}" && -s "${X}" && -r "${X}" ]]
+        then
+            FILES[$i]="${X}"
+            siz=$(stat -c%s "${X}")
+            SIZE[$i]=$siz
+            syz=$(optimizeSize $siz)
+            FILESTATUS[$i]="${X} [${syz}]"
+            (( i = i + 1 ))
+        fi
+    done
+else
+    i=1
+    for X in *.mkv
+    do
+        if [[ -e "${X}" && -s "${X}" && -r "${X}" ]]
+        then
+            FILES[$i]="${X}"
+            siz=$(stat -c%s "${X}")
+            SIZE[$i]=$siz
+            syz=$(optimizeSize $siz)
+            FILESTATUS[$i]="${X} [${syz}]"
+            (( i = i + 1 ))
+        fi
+    done
+fi
+
 echo "Found following files to process:"
-printf '    %s\n' "${FILES[@]}"
+printf '    %s\n' "${FILESTATUS[@]}"
 
 Errors=0
+Skipped=0
 
-for FILE in "${FILES[@]}"
+for (( i=1; i<=${#FILES[@]}; i++ ))
 do
+
+    FILE=${FILES[$i]}
 
     if [ -e STOP ]
     then
@@ -118,26 +163,50 @@ do
 
     LogMessage TS NoNL "${FILE}"
 
+    # read existing config file for current folder or look in upper folders
+    myDIR="${PWD}"
+    while [ "${myDIR}" != "" ]
+    do
+        if [ -e "${myDIR}/.${myself}.conf" ]
+        then
+            . "${myDIR}/.${myself}.conf"
+            break
+        else
+            myDIR=${myDIR%/*}
+        fi
+    done
+
+    if [ "${myDIR}" == "" ]
+    then
+        # set default parameters
+        VCODEC="${defaultVCODEC}"
+        CRF="${defaultCRF}"
+    fi
+
+    # set argument here
+    argCODEC=" -c:v ${VCODEC}"
+    argCRF=" -crf ${CRF}"
+
     Ext=${FILE##*.}
-    workFILE="${FILE%.${Ext}}.${VCODEC}.mkv"
+    workFILE="${FILE%.${Ext}}.${VCODEC}.${CRF}.mkv"
     oriFILE="${FILE%.${Ext}}.ori.${Ext}"
     newFILE="${FILE%.${Ext}}.mkv"
+
+    # Check if file has been already processed
+    x="${FILE%.${Ext}}"
+    if [ "${x%.ori}" != "${x}" ]
+    then
+        LogMessage NoTS NL "file already processed. Skipping it"
+        (( Skipped = Skipped + 1 ))
+        continue
+    fi
 
     if [ -e "${workFILE}" ] || [ -e "${oriFILE}" ]
     then
         LogMessage NoTS NL "file exists. Skipping it"
+        (( Skipped = Skipped + 1 ))
         continue
     fi
-
-    # read existing config file for current folder
-    if [ -e .${myself}.conf ]
-    then
-        . .${myself}.conf
-    fi
-
-    # set parameters
-    argCODEC=" -c:v ${VCODEC}"
-    argCRF=" -crf ${CRF}"
 
     echo "Command: ffmpeg -i "${FILE}" -map 0 ${argCRF} ${argCODEC} -c:a copy "${workFILE}" >"${workFILE%.*}.log" 2>&1" >"${workFILE%.*}.log"
     ffmpeg -i "${FILE}" -map 0 ${argCRF} ${argCODEC} -c:a copy "${workFILE}" >>"${workFILE%.*}.log" 2>&1
@@ -145,7 +214,10 @@ do
     if [ $? -eq 0 ]
     then
 
-        LogMessage NoTS NL "done"
+        siz=$(stat -c%s "${workFILE}")
+        Factor=$(echo "scale=1; ${SIZE[$i]}/${siz}" | bc -l)
+
+        LogMessage NoTS NL "done [${Factor}x]"
 
         renameFile
 
@@ -158,7 +230,11 @@ do
             ffmpeg -i "${FILE}" -map 0 ${argCRF} ${argCODEC} -c:a copy -sn "${workFILE}" >>"${workFILE%.*}.log" 2>&1
             if [ $? -eq 0 ]
             then
-                LogMessage NoTS NL " done"
+                siz=$(stat -c%s "${workFILE}")
+                Factor=$(echo "scale=1; ${SIZE[$i]}/${siz}" | bc -l)
+        
+                LogMessage NoTS NL "done [${Factor}x]"
+
                 renameFile
             fi
         else
@@ -169,9 +245,12 @@ do
 
 done
 
-if [ ${Errors} -gt 0 ]
+if [[ ${Errors} -gt 0 && ${Skipped} -gt 0 ]]
 then
-    LogMessage TS NL "Finished with ${Errors} errors"
+    LogMessage TS NL "Finished with ${Errors} errors and ${Skipped} skipped"
+elif [ ${Skipped} -gt 0 ]
+then
+    LogMessage TS NL "Finished with ${Skipped} skipped"
 else
     LogMessage TS NL "Finished"
 fi
