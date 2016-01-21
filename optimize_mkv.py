@@ -276,8 +276,8 @@ def Configuration(databasename):
                 print("Added ignore extension \"{}\" to "
                       "folder \"{}\"".format("log", thisFolder))
 
-    if folderlist and args.delete_ignore_extension_folder
-                  and args.delete_folder == False:
+    if (folderlist and args.delete_ignore_extension_folder
+            and args.delete_folder == False):
         for thisFolder in folderlist:
             for Ext in args.delete_ignore_extension_folder:
                 c.execute("SELECT 1 FROM watch_folder AS a "
@@ -296,8 +296,8 @@ def Configuration(databasename):
                     print("Ignore extension \"{}\" already exists for "
                           "folder \"{}\"".format(Ext, thisFolder))
 
-    if folderlist and args.add_ignore_extension_folder
-                  and args.delete_folder == False:
+    if (folderlist and args.add_ignore_extension_folder
+            and args.delete_folder == False):
         for thisFolder in folderlist:
             for Ext in args.add_ignore_extension_folder:
                 c.execute("SELECT 1 FROM watch_folder AS a "
@@ -317,8 +317,8 @@ def Configuration(databasename):
                     print("Ignore extension \"{}\" already exists for "
                           "folder \"{}\"".format(Ext, thisFolder))
 
-    if folderlist and args.delete_option_folder
-            and args.delete_folder == False:
+    if (folderlist and args.delete_option_folder
+            and args.delete_folder == False):
         for thisFolder in folderlist:
             for Option in args.delete_option_folder:
                 c.execute("SELECT 1 FROM watch_folder AS a "
@@ -370,8 +370,8 @@ def Configuration(databasename):
 
         for thisFolder in foli.keys():
             for File in os.listdir(thisFolder):
-                if File.split(".")[-1] in args.add_extension_as_done
-                        and File[0:1] != ".":
+                if (File.split(".")[-1] in args.add_extension_as_done
+                        and not File.startswith(".")):
                     fileName = os.path.splitext(File)[0]
                     fileExt  = os.path.splitext(File)[1][1:]
                     fileSize = os.path.getsize(os.path.join(thisFolder, File))
@@ -442,14 +442,17 @@ def IdentifyNewFiles(databasename):
             ignoreExtensions.append(row2[0])
 
         for File in os.listdir(row[1]):
-            if os.path.splitext(File)[1][1:] not in ignoreExtensions
-                    and File[0:1] != ".":
+            if (os.path.splitext(File)[1][1:] not in ignoreExtensions
+                    and not File.startswith(".")):
                 c.execute("SELECT 1 FROM folder_optimize_file "
                           "WHERE folder_id = ? AND file_name = ?",
                           [row[0], os.path.splitext(File)[0]])
                 if not c.fetchone():
                     fileSize = os.path.getsize(os.path.join(row[1], File))
-                    # folder_id, file_name, original_extension, original_size, optimize_pid, optimization_started_at, optimized_extension, optimized_size, runtime_seconds, file_status
+                    # folder_id, file_name, original_extension, original_size,
+                    # optimize_pid, optimization_started_at,
+                    # optimized_extension, optimized_size, runtime_seconds,
+                    # file_status
                     try:
                         c.execute("INSERT INTO folder_optimize_file ("
                                   "folder_id, file_name, original_extension, "
