@@ -33,7 +33,7 @@
 # CAUTION:
 # If you are familiar with SQL and sqlite3, and want to change configuration
 # in the repository database manually, be careful to enable foreign keys
-# first. Otherwise you might get inconsistend data.
+# first. Otherwise you might get inconsistent data.
 # Default in sqlite3 is usually with deactived foreign keys!!!
 # But under no circumstance, change definition of existing tables!!!
 
@@ -41,7 +41,7 @@
 # set current repository version to be able to migrate tables from
 # older repositories
 # Do not change this value unless you know what you're doing
-current_repository_version = (1, )
+current_repository_version = 1
 
 # Define initial default values for process arguments
 optimization_default_options = [
@@ -131,10 +131,10 @@ databasename = os.path.join(homepath, "." + MyName + ".db")
 
 
 def InitializeDatabase(databasename):
-    '''
+    """
     Repository database does not exist, add new one and create tables
     Also populate some tables with initial values
-    '''
+    """
 
     print("This is the first start of {} => "
           "Initializing database".format(MyName))
@@ -153,43 +153,53 @@ def InitializeDatabase(databasename):
               "FROM repository_version) >= 1 BEGIN "
               "SELECT RAISE(FAIL, 'Only one row allowed!'); END")
     c.execute("CREATE TABLE watch_folder ("
-              "folder_id UNSIGNED INTEGER NOT NULL PRIMARY KEY, "
-              "folder_name TEXT NOT NULL, last_optimized_at TEXT, "
-              "num_optimized_files UNSIGNED INTEGER)")
+              "watch_folder_id UNSIGNED INTEGER NOT NULL PRIMARY KEY "
+              "AUTOINCREMENT, "
+              "watch_folder_name TEXT NOT NULL, "
+              "recursive_yn UNSIGNED TINYINT NOT NULL DEFAULT 1 "
+              "CHECK(recursive_yn in (0, 1))) WITHOUT ROWID")
+    c.execute("CREATE TABLE real_folder ("
+              "real_folder_id UNSIGNED INTEGER NOT NULL PRIMARY KEY "
+              "AUTOINCREMENT, "
+              "watch_folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
+              "watch_folder (watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
+              "real_folder_name TEXT NOT NULL "
+              "UNIQUE(real_folder_name)) WITHOUT ROWID")
     c.execute("CREATE TABLE folder_ignore_extension ("
-              "folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
-              "watch_folder (folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
+              "watch_folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
+              "watch_folder (watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "ignore_extension TEXT NOT NULL, "
-              "PRIMARY KEY (folder_id, ignore_extension))")
+              "PRIMARY KEY (watch_folder_id, ignore_extension)) WITHOUT ROWID")
     c.execute("CREATE TABLE folder_optimize_file ("
-              "folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
-              "watch_folder (folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
+              "real_folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
+              "watch_folder (watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "file_name TEXT NOT NULL, original_extension TEXT NOT NULL, "
               "original_size UNSIGNED BIGINT NOT NULL, "
               "original_first_seen_at TEXT NOT NULL, optimize_pid INTEGER, "
               "optimization_started_at TEXT, optimized_extension TEXT, "
               "optimized_size UNSIGNED BIGINT, runtime_seconds INTEGER, "
               "file_status TINYINT NOT NULL, "
-              "PRIMARY KEY (folder_id, file_name))")
+              "PRIMARY KEY (watch_folder_id, file_name)) WITHOUT ROWID")
     c.execute("CREATE TABLE folder_option ("
-              "folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
-              "watch_folder (folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
+              "watch_folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
+              "watch_folder (watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "folder_option TEXT NOT NULL, "
-              "PRIMARY KEY (folder_id, folder_option))")
+              "PRIMARY KEY (watch_folder_id, folder_option)) WITHOUT ROWID")
     c.execute("CREATE TABLE optimization_default_option ("
-              "default_option TEXT PRIMARY KEY NOT NULL)")
+              "default_option TEXT PRIMARY KEY NOT NULL) WITHOUT ROWID")
     c.execute("CREATE TABLE current_running ("
               "started_at TEXT NOT NULL PRIMARY KEY, "
-              "pid UNSIGNED INTEGER NOT NULL)")
-    c.execute("CREATE TABLE message (message_text TEXT NOT NULL PRIMARY KEY)")
+              "pid UNSIGNED INTEGER NOT NULL) WITHOUT ROWID")
+    c.execute("CREATE TABLE message (message_text TEXT NOT NULL PRIMARY KEY) "
+              "WITHOUT ROWID")
     c.execute("CREATE TRIGGER NMR_message BEFORE INSERT ON message "
               "WHEN (SELECT COUNT(*) FROM message) >= 1 BEGIN "
               "SELECT RAISE(FAIL, 'Only one row allowed!'); END")
     c.execute("CREATE TABLE application_option ("
               "option_key TEXT NOT NULL PRIMARY KEY, "
-              "option_value TEXT NOT NULL)")
+              "option_value TEXT NOT NULL) WITHOUT ROWID")
     c.execute("INSERT INTO repository_version (version_number) "
-              "VALUES (?)", current_repository_version)
+              "VALUES (?)", [current_repository_version, ])
     c.executemany("INSERT INTO optimization_default_option VALUES (?)",
                   optimization_default_options)
     for Option in optimization_default_options:
@@ -203,9 +213,9 @@ def InitializeDatabase(databasename):
 
 
 def OpenReadDatabase(databasename):
-    '''
+    """
     Repository database exists. Read data into variables
-    '''
+    """
     conn = sqlite3.connect(databasename)
     c = conn.cursor()
     c.execute("PRAGMA FOREIGN_KEYS = ON")
@@ -219,7 +229,7 @@ def OpenReadDatabase(databasename):
         sys.exit(1)
 
     c.execute("SELECT version_number FROM repository_version")
-    if c.fetchone()[0] < current_repository_version[0]:
+    if c.fetchone()[0] < current_repository_version:
         # Database version is old, need to migrate to newest version
         pass
 
@@ -227,9 +237,9 @@ def OpenReadDatabase(databasename):
 
 
 def Configuration(databasename):
-    '''
+    """
     Manipulate configuration directly in database file.
-    '''
+    """
 
     conn = sqlite3.connect(databasename)
     c = conn.cursor()
@@ -244,51 +254,69 @@ def Configuration(databasename):
     elif args.current_folder:
         folderlist.append(os.path.abspath(os.path.curdir))
 
+    # Delete watch folder
     if folderlist and args.delete_folder == True:
         for thisFolder in folderlist:
             c.execute("SELECT COUNT(*) FROM watch_folder "
-                      "WHERE folder_name = ?", [thisFolder])
+                      "WHERE watch_folder_name = ?", [thisFolder])
             if c.fetchone()[0] != 1:
                 print("Folder \"{}\" is not not in watch list", [thisFolder])
             else:
-                c.execute("DELETE FROM watch_folder WHERE folder_name = ?",
+                c.execute("DELETE FROM watch_folder WHERE watch_folder_name = ?",
                           [thisFolder])
                 print("Deleted folder \"{}\" from watch list including all "
                       "related data".format(thisFolder))
 
+    # Add folder(s) to watch list
     if folderlist and args.add_folder == True:
         for thisFolder in folderlist:
             c.execute("SELECT COUNT(*) FROM watch_folder "
-                      "WHERE folder_name = ?", [thisFolder])
+                      "WHERE watch_folder_name = ?", [thisFolder])
             if c.fetchone()[0] > 0:
                 print("Folder {} is already in watch list".format(thisFolder))
             else:
-                c.execute("SELECT MAX(folder_id) + 1 FROM watch_folder")
-                count = c.fetchone()[0]
-                if not count:
-                    count = 1
-                c.execute("INSERT INTO watch_folder (folder_id, folder_name) "
-                          "VALUES (?, ?)", [count, thisFolder])
+                # First, check tree if already a watch folder
+                checkFolder, tail = os.path.split(thisFolder)
+                while checkFolder:
+                    c.execute("SELECT COUNT(*) FROM watch_folder "
+                              "WHERE watch_folder_name = ?", [checkFolder])
+                    if c.fetchone():
+                        print("Folder \"{}\" is part of other folder already in "
+                              "watch list")
+                        checkFolder = False
+                    else:
+                        checkFolder, tail = os.path.split(checkFolder)
+
+                if checkFolder:
+                    # now, we need to end this iteration and do nothing
+                    continue
+
+                c.execute("INSERT INTO watch_folder (watch_folder_name) "
+                          "VALUES (?)", [thisFolder])
+                          currentRowId = c.lastrowid
                 print("Added folder \"{}\" to watch list".format(thisFolder))
                 # Always add extension "log" to new folder automatically
-                c.execute("INSERT INTO folder_ignore_extension (folder_id, "
-                          "ignore_extension) VALUES (?, ?)", [count, "log"])
+                c.execute("INSERT INTO folder_ignore_extension ("
+                          "watch_folder_id, ignore_extension) VALUES (?, ?)",
+                          [currentRowId, "log"])
                 print("Added ignore extension \"{}\" to "
                       "folder \"{}\"".format("log", thisFolder))
 
+    # Delete ignore extension(s) from watch folders
     if (folderlist and args.delete_ignore_extension_folder
             and args.delete_folder == False):
         for thisFolder in folderlist:
             for Ext in args.delete_ignore_extension_folder:
                 c.execute("SELECT 1 FROM watch_folder AS a "
                           "JOIN folder_ignore_extension AS b "
-                          "ON a.folder_id = b.folder_id "
-                          "WHERE a.folder_name = ? "
+                          "ON a.watch_folder_id = b.watch_folder_id "
+                          "WHERE a.watch_folder_name = ? "
                           "AND b.ignore_extension = ? ", [thisFolder, Ext])
                 if c.fetchone():
                     c.execute("DELETE FROM folder_ignore_extension "
-                              "WHERE folder_id = (SELECT folder_id "
-                              "FROM watch_folder WHERE folder_name = ?) "
+                              "WHERE watch_folder_id = ("
+                              "SELECT watch_folder_id "
+                              "FROM watch_folder WHERE watch_folder_name = ?) "
                               "and ignore_extension = ?", [thisFolder, Ext])
                     print("Deleted ignore extension \"{}\" from "
                           "folder \"{}\"".format(Ext, thisFolder))
@@ -296,40 +324,43 @@ def Configuration(databasename):
                     print("Ignore extension \"{}\" already exists for "
                           "folder \"{}\"".format(Ext, thisFolder))
 
+    # Insert new extension(s) to ignore from watch folder
     if (folderlist and args.add_ignore_extension_folder
             and args.delete_folder == False):
         for thisFolder in folderlist:
             for Ext in args.add_ignore_extension_folder:
                 c.execute("SELECT 1 FROM watch_folder AS a "
                           "JOIN folder_ignore_extension AS b "
-                          "ON a.folder_id = b.folder_id "
-                          "WHERE a.folder_name = ? "
+                          "ON a.watch_folder_id = b.watch_folder_id "
+                          "WHERE a.watch_folder_name = ? "
                           "AND b.ignore_extension = ? ", [thisFolder, Ext])
                 if not c.fetchone():
                     c.execute("INSERT INTO folder_ignore_extension ("
-                              "folder_id, ignore_extension) "
-                              "SELECT folder_id, ? "
+                              "watch_folder_id, ignore_extension) "
+                              "SELECT watch_folder_id, ? "
                               "FROM watch_folder "
-                              "WHERE folder_name = ?", [Ext, thisFolder])
+                              "WHERE watch_folder_name = ?", [Ext, thisFolder])
                     print("Added ignore extension \"{}\" to "
                           "folder \"{}\"".format(Ext, thisFolder))
                 else:
                     print("Ignore extension \"{}\" already exists for "
                           "folder \"{}\"".format(Ext, thisFolder))
 
+    # Delete option(s) from watch folder
     if (folderlist and args.delete_option_folder
             and args.delete_folder == False):
         for thisFolder in folderlist:
             for Option in args.delete_option_folder:
                 c.execute("SELECT 1 FROM watch_folder AS a "
                           "JOIN folder_option AS b "
-                          "ON a.folder_id = b.folder_id "
-                          "WHERE a.folder_name = ? "
+                          "ON a.watch_folder_id = b.watch_folder_id "
+                          "WHERE a.watch_folder_name = ? "
                           "AND b.folder_option = ? ", [thisFolder, Option])
                 if c.fetchone():
                     c.execute("DELETE FROM folder_option "
-                              "WHERE folder_id = (SELECT folder_id "
-                              "FROM watch_folder WHERE folder_name = ?) "
+                              "WHERE watch_folder_id = ("
+                              "SELECT watch_folder_id "
+                              "FROM watch_folder WHERE watch_folder_name = ?) "
                               "AND folder_option = ?", [thisFolder, Option])
                     print("Deleted option \"{}\" from "
                           "folder \"{}\"".format(Option, thisFolder))
@@ -337,35 +368,37 @@ def Configuration(databasename):
                     print("Folder option \"{}\" does not exist for "
                           "folder \"{}\"".format(Option, thisFolder))
 
+    # insert option(s) to watch folder
     if folderlist and args.add_option_folder and args.delete_folder == False:
         for thisFolder in folderlist:
             for Option in args.add_option_folder:
                 c.execute("SELECT 1 FROM watch_folder AS a "
                           "JOIN folder_option AS b "
-                          "ON a.folder_id = b.folder_id "
-                          "WHERE a.folder_name = ? "
+                          "ON a.watch_folder_id = b.watch_folder_id "
+                          "WHERE a.watch_folder_name = ? "
                           "AND b.folder_option = ? ", [thisFolder, Option])
                 if not c.fetchone():
-                    c.execute("INSERT INTO folder_option (folder_id, "
-                              "folder_option) SELECT folder_id, ? "
+                    c.execute("INSERT INTO folder_option (watch_folder_id, "
+                              "folder_option) SELECT watch_folder_id, ? "
                               "FROM watch_folder "
-                              "WHERE folder_name = ?", [Option, thisFolder])
+                              "WHERE watch_folder_name = ?", [Option, thisFolder])
                     print("Added option \"{}\" to "
                           "folder \"{}\"".format(Option, thisFolder))
                 else:
                     print("Folder option \"{}\" already exists for "
                           "folder \"{}\"".format(Option, thisFolder))
 
+    # Find files and mark them based on extension as done
     if args.add_extension_as_done:
         foli = {}
         if folderlist:
-            for row in c.execute("SELECT folder_id, folder_name "
-                                 "FROM watch_folder"):
+            for row in c.execute("SELECT real_folder_id, real_folder_name, "
+                                 "FROM real_folder"):
                 if row[1] in folderlist:
                     foli[row[1]] = row[0]
         else:
-            for row in c.execute("SELECT folder_id, folder_name "
-                                 "FROM watch_folder"):
+            for row in c.execute("SELECT real_folder_id, real_folder_name, "
+                                 "FROM real_folder"):
                 foli[row[1]] = row[0]
 
         for thisFolder in foli.keys():
@@ -378,14 +411,15 @@ def Configuration(databasename):
 
                     c.execute("SELECT 1, file_status "
                               "FROM folder_optimize_file "
-                              "WHERE folder_id = ? AND file_name = ? ",
+                              "WHERE real_folder_id = ? AND file_name = ? ",
                               [foli[thisFolder], fileName])
                     get = c.fetchone()
                     if not get:
                         c.execute("INSERT INTO folder_optimize_file ("
-                                  "folder_id, file_name, original_extension, "
-                                  "original_size, original_first_seen_at, "
-                                  "optimize_pid, optimization_started_at, "
+                                  "real_folder_id, file_name, "
+                                  "original_extension, original_size, "
+                                  "original_first_seen_at, optimize_pid, "
+                                  "optimization_started_at, "
                                   "optimized_extension, optimized_size, "
                                   "runtime_seconds, file_status) "
                                   "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -403,7 +437,7 @@ def Configuration(databasename):
                                   "optimized_extension = ?,"
                                   "optimized_size = ?, runtime_seconds = ?,"
                                   "file_status = ? "
-                                  "WHERE folder_id = ? "
+                                  "WHERE real_folder_id = ? "
                                   "AND file_name = ?", [-1, datetime.now(),
                                                         fileExt, fileSize, -1,
                                                         1, foli[thisFolder],
@@ -420,7 +454,45 @@ def Configuration(databasename):
 
 
 def Execution():
+    """
+    Reading configuration database and process data in watch folders
+    """
     pass
+
+
+def GetWatchFolderId(folderName):
+    """
+    Search for foldername and return id of watch folder
+    """
+    c.execute("SELECT watch_folder_id FROM watch_folder "
+              "WHERE watch_folder_name = ?",
+              [folderName])
+
+    return(c.fetchone[0])
+
+
+def InsertNewRealFolder(watchFolderId, folderName):
+    """
+    Check if folder already exists and insert if not
+    """
+    c.execute("SELECT 1 FROM real_folder "
+              "WHERE watch_folder_id = ? AND name = ?",
+              [row[0], folderName])
+    if not c.fetchone():
+        c.execute("INSERT INTO real_folder ("
+                  "watch_folder_id, real_folder_name) "
+                  "VALUES (?, ?)",
+                  [row[0], folderName])
+
+
+def IdentifyNewRealFolders:
+    """
+    Based on watch folders generate list of real folders
+    """
+    for row in c.execute("SELECT watch_folder_id, watch_folder_name "
+                         "FROM watch_folder"):
+        for root, dirs, files in os.walk(row[1]):
+            InsertNewRealFolder(row[0], root)
 
 
 def IdentifyNewFiles(databasename):
@@ -433,29 +505,30 @@ def IdentifyNewFiles(databasename):
     c = conn.cursor()
     c.execute("PRAGMA FOREIGN_KEYS = ON")
 
-    for row in c.execute("SELECT folder_id, folder_name FROM watch_folder"):
+    # First, check if new folders have been created below our watch folders
+    IdentifyNewRealFolders
+
+    for row in c.execute("SELECT real_folder_id, watch_folder_id, real_folder_name "
+                         "FROM real_folder"):
         ignoreExtensions = []
 
         for row2 in c.execute("SELECT ignore_extension "
                               "FROM folder_ignore_extension "
-                              "WHERE folder_id = ?", [row[0], ]):
+                              "WHERE watch_folder_id = ?", [row[1], ]):
             ignoreExtensions.append(row2[0])
 
         for File in os.listdir(row[1]):
             if (os.path.splitext(File)[1][1:] not in ignoreExtensions
                     and not File.startswith(".")):
                 c.execute("SELECT 1 FROM folder_optimize_file "
-                          "WHERE folder_id = ? AND file_name = ?",
+                          "WHERE real_folder_id = ? AND file_name = ?",
                           [row[0], os.path.splitext(File)[0]])
                 if not c.fetchone():
                     fileSize = os.path.getsize(os.path.join(row[1], File))
-                    # folder_id, file_name, original_extension, original_size,
-                    # optimize_pid, optimization_started_at,
-                    # optimized_extension, optimized_size, runtime_seconds,
-                    # file_status
                     try:
                         c.execute("INSERT INTO folder_optimize_file ("
-                                  "folder_id, file_name, original_extension, "
+                                  "real_folder_id, file_name, "
+                                  "original_extension, "
                                   "original_first_seen_at, original_size, "
                                   "file_status) VALUES (?, ?, ?, ?, ?, ?)",
                                   [row[0], os.path.splitext(File)[0],
@@ -463,7 +536,7 @@ def IdentifyNewFiles(databasename):
                                     os.path.splitext(File)[1][1:],
                                     fileSize, 0])
                     except sqlite3.IntegrityError as e:
-                        print("Ho, foreign key to watch folder violated! "
+                        print("Ho, foreign key to real folder violated! "
                               "Deleted in the meantime?")
                     else:
                         print("Added file \"{}\" in folder \"{}\" to optimize "
