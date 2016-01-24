@@ -110,6 +110,8 @@ parser_conf.add_argument('-p', '--add-file-as-done', metavar='videofile',
                          action='store', nargs="+",
                          help='Add files found in folder(s) filtered by '
                          'extension(s) as processed')
+parser_conf.add_argument('-r', '--folder-recursive', action='store_true',
+                         help='If new folder, define the as recursive')
 parser_exec = subparsers.add_parser('execute', aliases=['execute', 'exec', 'e',
                                                         'run', 'r'],
                                     help='Run optimization process')
@@ -154,7 +156,7 @@ def InitializeDatabase(databasename):
     c.execute("CREATE TABLE watch_folder ("
               "watch_folder_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
               "watch_folder_name TEXT NOT NULL, "
-              "recursive_yn UNSIGNED TINYINT NOT NULL DEFAULT 1 "
+              "recursive_yn UNSIGNED TINYINT NOT NULL DEFAULT 0 "
               "CHECK(recursive_yn in (0, 1)))")
     c.execute("CREATE TABLE real_folder ("
               "real_folder_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
@@ -212,6 +214,7 @@ def OpenReadDatabase(databasename):
     """
     Repository database exists. Read data into variables
     """
+
     conn = sqlite3.connect(databasename)
     c = conn.cursor()
     c.execute("PRAGMA FOREIGN_KEYS = ON")
@@ -233,20 +236,27 @@ def OpenReadDatabase(databasename):
 
 
 def checkWatchFolderExists(c, checkFolder):
-    # First, check tree if already a watch folder
+    """
+    Check if watch folder or subtree already exists as watch folder or
+    in tree (return true or false)
+    """
+
     folderFound = False
 
-    c.execute("SELECT COUNT(*) FROM watch_folder "
-              "WHERE watch_folder_name like ?", [checkFolder + '%'])
+    if args.folder_recursive:
+        c.execute("SELECT COUNT(*) FROM watch_folder "
+                  "WHERE watch_folder_name like ?", [checkFolder + '%'])
 
-    if c.fetchone()[0]:
-        print("Subfolder of \"{}\" is already in watch list"
-              .format(checkFolder))
-        folderFound = True
+        if c.fetchone()[0]:
+            print("Subfolder of \"{}\" is already in watch list"
+                  .format(checkFolder))
+            folderFound = True
 
     while checkFolder:
+        checkFolder = os.path.split(checkFolder)[0]
         c.execute("SELECT COUNT(*) FROM watch_folder "
-                  "WHERE watch_folder_name = ?", [checkFolder])
+                  "WHERE watch_folder_name = ? "
+                  "AND recursive_yn = 1", [checkFolder])
         if not c.fetchone():
             print("Folder \"{}\" is part of other folder already "
                   "in watch list".format(checkFolder))
@@ -258,6 +268,199 @@ def checkWatchFolderExists(c, checkFolder):
                 checkFolder = False
 
     return(folderFound)
+
+
+def deleteWatchFolder():
+    """
+    Check if watch folder exists and delete if
+    With enabled foreign keys, all subsidiary will be deleted as well
+    """
+
+    c.execute("SELECT COUNT(*) FROM watch_folder "
+              "WHERE watch_folder_name = ?", [thisFolder])
+    if c.fetchone()[0] != 1:
+        print("Folder \"{}\" is not not in watch list", [thisFolder])
+    else:
+        c.execute("DELETE FROM watch_folder "
+                  "WHERE watch_folder_name = ?", [thisFolder])
+        print("Deleted folder \"{}\" from watch list including all "
+              "related data".format(thisFolder))
+
+
+def insertNewWatchFolder(c, thisFolder):
+    """
+    Check if given watch folder already exists and insert if not
+    """
+
+    c.execute("SELECT COUNT(*) FROM watch_folder "
+              "WHERE watch_folder_name = ?", [thisFolder])
+    if c.fetchone()[0] > 0:
+        print("Folder \"{}\" is already in watch list"
+              .format(thisFolder))
+    elif checkWatchFolderExists(c, thisFolder):
+        pass
+    else:
+        if args.folder_recursive:
+            recursiveYN = 1
+        else:
+            recursiveYN = 0
+        c.execute("INSERT INTO watch_folder (watch_folder_name, recursive_yn) "
+                  "VALUES (?, ?)",
+                  [thisFolder, recursiveYN])
+        currentRowId = c.lastrowid
+        print("Added folder \"{}\" to watch list".format(thisFolder))
+        # Always add extension "log" to new folder automatically
+        c.execute("INSERT INTO folder_ignore_extension ("
+                  "watch_folder_id, ignore_extension) VALUES (?, ?)",
+                  [currentRowId, "log"])
+        print("Added ignore extension \"{}\" to folder \"{}\""
+              .format("log", thisFolder))
+
+
+def deleteIgnoreExtension(c, thisFolder, Ext):
+    """
+    Check if ignore extension exists for given folder and delete if
+    """
+
+    c.execute("SELECT 1 FROM watch_folder AS a "
+              "JOIN folder_ignore_extension AS b "
+              "ON a.watch_folder_id = b.watch_folder_id "
+              "WHERE a.watch_folder_name = ? "
+              "AND b.ignore_extension = ? ", [thisFolder, Ext])
+    if c.fetchone():
+        c.execute("DELETE FROM folder_ignore_extension "
+                  "WHERE watch_folder_id = ("
+                  "SELECT watch_folder_id "
+                  "FROM watch_folder WHERE watch_folder_name = ?) "
+                  "and ignore_extension = ?", [thisFolder, Ext])
+        print("Deleted ignore extension \"{}\" from "
+              "folder \"{}\"".format(Ext, thisFolder))
+    else:
+        print("Ignore extension \"{}\" already exists for "
+              "folder \"{}\"".format(Ext, thisFolder))
+
+
+def insertNewIgnoreExtension(c, thisFolder, Ext):
+    """
+    Check if given ignore extension in watch folder already exists and
+    insert if not
+    """
+
+    c.execute("SELECT 1 FROM watch_folder AS a "
+              "JOIN folder_ignore_extension AS b "
+              "ON a.watch_folder_id = b.watch_folder_id "
+              "WHERE a.watch_folder_name = ? "
+              "AND b.ignore_extension = ? ", [thisFolder, Ext])
+    if not c.fetchone():
+        c.execute("INSERT INTO folder_ignore_extension ("
+                  "watch_folder_id, ignore_extension) "
+                  "SELECT watch_folder_id, ? "
+                  "FROM watch_folder "
+                  "WHERE watch_folder_name = ?", [Ext, thisFolder])
+        print("Added ignore extension \"{}\" to "
+              "folder \"{}\"".format(Ext, thisFolder))
+    else:
+        print("Ignore extension \"{}\" already exists for "
+              "folder \"{}\"".format(Ext, thisFolder))
+
+
+def deleteFolderOption(c, thisFolder, Option):
+    """
+    Check if folder option exists for given folder and delete if
+    """
+
+    c.execute("SELECT 1 FROM watch_folder AS a "
+              "JOIN folder_option AS b "
+              "ON a.watch_folder_id = b.watch_folder_id "
+              "WHERE a.watch_folder_name = ? "
+              "AND b.folder_option = ? ", [thisFolder, Option])
+    if c.fetchone():
+        c.execute("DELETE FROM folder_option "
+                  "WHERE watch_folder_id = ("
+                  "SELECT watch_folder_id "
+                  "FROM watch_folder WHERE watch_folder_name = ?) "
+                  "AND folder_option = ?", [thisFolder, Option])
+        print("Deleted option \"{}\" from "
+              "folder \"{}\"".format(Option, thisFolder))
+    else:
+        print("Folder option \"{}\" does not exist for "
+              "folder \"{}\"".format(Option, thisFolder))
+
+
+def InsertNewFolderOption(c, thisFolder, Option):
+    """
+    Check if given folder option in watch folder already exists and
+    insert if not
+    """
+
+    c.execute("SELECT 1 FROM watch_folder AS a "
+              "JOIN folder_option AS b "
+              "ON a.watch_folder_id = b.watch_folder_id "
+              "WHERE a.watch_folder_name = ? "
+              "AND b.folder_option = ? ", [thisFolder, Option])
+    if not c.fetchone():
+        c.execute("INSERT INTO folder_option (watch_folder_id, "
+                  "folder_option) SELECT watch_folder_id, ? "
+                  "FROM watch_folder "
+                  "WHERE watch_folder_name = ?",
+                  [Option, thisFolder])
+        print("Added option \"{}\" to "
+              "folder \"{}\"".format(Option, thisFolder))
+    else:
+        print("Folder option \"{}\" already exists for "
+              "folder \"{}\"".format(Option, thisFolder))
+
+
+def markFileAsDone(c, real_folder_id, thisFolder, File):
+    """
+    Check if file already exists, then update to done else
+    insert new record
+    """
+
+    if (File.split(".")[-1] in args.add_extension_as_done
+            and not File.startswith(".")):
+        fileName = os.path.splitext(File)[0]
+        fileExt  = os.path.splitext(File)[1][1:]
+        fileSize = os.path.getsize(os.path.join(thisFolder, File))
+
+        c.execute("SELECT 1, file_status "
+                  "FROM folder_optimize_file "
+                  "WHERE real_folder_id = ? AND file_name = ? ",
+                  [real_folder_id, fileName])
+        get = c.fetchone()
+        if not get:
+            c.execute("INSERT INTO folder_optimize_file ("
+                      "real_folder_id, file_name, "
+                      "original_extension, original_size, "
+                      "original_first_seen_at, optimize_pid, "
+                      "optimization_started_at, "
+                      "optimized_extension, optimized_size, "
+                      "runtime_seconds, file_status) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                 [real_folder_id, fileName,
+                                        fileExt, fileSize,
+                                        datetime.now(), -1,
+                                        datetime.now(), fileExt,
+                                        fileSize, -1, 1])
+            print("Added file \"{}\" to folder \"{}\" as done"
+                  .format(File, thisFolder))
+        elif get[0] == 1 and get[1] == 0:
+            c.execute("UPDATE folder_optimize_file "
+                      "SET optimize_pid = ?,"
+                      "optimization_started_at = ?,"
+                      "optimized_extension = ?,"
+                      "optimized_size = ?, runtime_seconds = ?,"
+                      "file_status = ? "
+                      "WHERE real_folder_id = ? "
+                      "AND file_name = ?", [-1, datetime.now(),
+                                            fileExt, fileSize, -1,
+                                            1, real_folder_id,
+                                                    fileName])
+            print("File \"{}\" in folder \"{}\" changed to "
+                  "optimized".format(File, thisFolder))
+        else:
+            print("File \"{}\" in folder \"{}\" already optimized"
+                  .format(File, thisFolder))
 
 
 def Configuration(databasename):
@@ -281,125 +484,39 @@ def Configuration(databasename):
     # Delete watch folder
     if folderlist and args.delete_folder == True:
         for thisFolder in folderlist:
-            c.execute("SELECT COUNT(*) FROM watch_folder "
-                      "WHERE watch_folder_name = ?", [thisFolder])
-            if c.fetchone()[0] != 1:
-                print("Folder \"{}\" is not not in watch list", [thisFolder])
-            else:
-                c.execute("DELETE FROM watch_folder "
-                          "WHERE watch_folder_name = ?", [thisFolder])
-                print("Deleted folder \"{}\" from watch list including all "
-                      "related data".format(thisFolder))
+            deleteWatchFolder(c, thisFolder)
 
     # Add folder(s) to watch list
     if folderlist and args.add_folder == True:
         for thisFolder in folderlist:
-            c.execute("SELECT COUNT(*) FROM watch_folder "
-                      "WHERE watch_folder_name = ?", [thisFolder])
-            if c.fetchone()[0] > 0:
-                print("Folder \"{}\" is already in watch list"
-                      .format(thisFolder))
-            else:
-                if checkWatchFolderExists(c, os.path.split(thisFolder)[0]):
-                    continue
-
-                c.execute("INSERT INTO watch_folder (watch_folder_name) "
-                          "VALUES (?)", [thisFolder])
-                currentRowId = c.lastrowid
-                print("Added folder \"{}\" to watch list".format(thisFolder))
-                # Always add extension "log" to new folder automatically
-                c.execute("INSERT INTO folder_ignore_extension ("
-                          "watch_folder_id, ignore_extension) VALUES (?, ?)",
-                          [currentRowId, "log"])
-                print("Added ignore extension \"{}\" to "
-                      "folder \"{}\"".format("log", thisFolder))
+            insertNewWatchFolder(c, thisFolder)
 
     # Delete ignore extension(s) from watch folders
     if (folderlist and args.delete_ignore_extension_folder
             and args.delete_folder == False):
         for thisFolder in folderlist:
             for Ext in args.delete_ignore_extension_folder:
-                c.execute("SELECT 1 FROM watch_folder AS a "
-                          "JOIN folder_ignore_extension AS b "
-                          "ON a.watch_folder_id = b.watch_folder_id "
-                          "WHERE a.watch_folder_name = ? "
-                          "AND b.ignore_extension = ? ", [thisFolder, Ext])
-                if c.fetchone():
-                    c.execute("DELETE FROM folder_ignore_extension "
-                              "WHERE watch_folder_id = ("
-                              "SELECT watch_folder_id "
-                              "FROM watch_folder WHERE watch_folder_name = ?) "
-                              "and ignore_extension = ?", [thisFolder, Ext])
-                    print("Deleted ignore extension \"{}\" from "
-                          "folder \"{}\"".format(Ext, thisFolder))
-                else:
-                    print("Ignore extension \"{}\" already exists for "
-                          "folder \"{}\"".format(Ext, thisFolder))
+                deleteIgnoreExtension(c, thisFolder, Ext)
 
     # Insert new extension(s) to ignore from watch folder
     if (folderlist and args.add_ignore_extension_folder
             and args.delete_folder == False):
         for thisFolder in folderlist:
             for Ext in args.add_ignore_extension_folder:
-                c.execute("SELECT 1 FROM watch_folder AS a "
-                          "JOIN folder_ignore_extension AS b "
-                          "ON a.watch_folder_id = b.watch_folder_id "
-                          "WHERE a.watch_folder_name = ? "
-                          "AND b.ignore_extension = ? ", [thisFolder, Ext])
-                if not c.fetchone():
-                    c.execute("INSERT INTO folder_ignore_extension ("
-                              "watch_folder_id, ignore_extension) "
-                              "SELECT watch_folder_id, ? "
-                              "FROM watch_folder "
-                              "WHERE watch_folder_name = ?", [Ext, thisFolder])
-                    print("Added ignore extension \"{}\" to "
-                          "folder \"{}\"".format(Ext, thisFolder))
-                else:
-                    print("Ignore extension \"{}\" already exists for "
-                          "folder \"{}\"".format(Ext, thisFolder))
+                insertNewIgnoreExtension(c, thisFolder, Ext)
 
     # Delete option(s) from watch folder
     if (folderlist and args.delete_option_folder
             and args.delete_folder == False):
         for thisFolder in folderlist:
             for Option in args.delete_option_folder:
-                c.execute("SELECT 1 FROM watch_folder AS a "
-                          "JOIN folder_option AS b "
-                          "ON a.watch_folder_id = b.watch_folder_id "
-                          "WHERE a.watch_folder_name = ? "
-                          "AND b.folder_option = ? ", [thisFolder, Option])
-                if c.fetchone():
-                    c.execute("DELETE FROM folder_option "
-                              "WHERE watch_folder_id = ("
-                              "SELECT watch_folder_id "
-                              "FROM watch_folder WHERE watch_folder_name = ?) "
-                              "AND folder_option = ?", [thisFolder, Option])
-                    print("Deleted option \"{}\" from "
-                          "folder \"{}\"".format(Option, thisFolder))
-                else:
-                    print("Folder option \"{}\" does not exist for "
-                          "folder \"{}\"".format(Option, thisFolder))
+                deleteFolderOption(c, thisFolder, Option)
 
     # insert option(s) to watch folder
     if folderlist and args.add_option_folder and args.delete_folder == False:
         for thisFolder in folderlist:
             for Option in args.add_option_folder:
-                c.execute("SELECT 1 FROM watch_folder AS a "
-                          "JOIN folder_option AS b "
-                          "ON a.watch_folder_id = b.watch_folder_id "
-                          "WHERE a.watch_folder_name = ? "
-                          "AND b.folder_option = ? ", [thisFolder, Option])
-                if not c.fetchone():
-                    c.execute("INSERT INTO folder_option (watch_folder_id, "
-                              "folder_option) SELECT watch_folder_id, ? "
-                              "FROM watch_folder "
-                              "WHERE watch_folder_name = ?",
-                              [Option, thisFolder])
-                    print("Added option \"{}\" to "
-                          "folder \"{}\"".format(Option, thisFolder))
-                else:
-                    print("Folder option \"{}\" already exists for "
-                          "folder \"{}\"".format(Option, thisFolder))
+                InsertNewFolderOption(c, thisFolder, Option)
 
     # Find files and mark them based on extension as done
     if args.add_extension_as_done:
@@ -416,50 +533,7 @@ def Configuration(databasename):
 
         for thisFolder in foli.keys():
             for File in os.listdir(thisFolder):
-                if (File.split(".")[-1] in args.add_extension_as_done
-                        and not File.startswith(".")):
-                    fileName = os.path.splitext(File)[0]
-                    fileExt  = os.path.splitext(File)[1][1:]
-                    fileSize = os.path.getsize(os.path.join(thisFolder, File))
-
-                    c.execute("SELECT 1, file_status "
-                              "FROM folder_optimize_file "
-                              "WHERE real_folder_id = ? AND file_name = ? ",
-                              [foli[thisFolder], fileName])
-                    get = c.fetchone()
-                    if not get:
-                        c.execute("INSERT INTO folder_optimize_file ("
-                                  "real_folder_id, file_name, "
-                                  "original_extension, original_size, "
-                                  "original_first_seen_at, optimize_pid, "
-                                  "optimization_started_at, "
-                                  "optimized_extension, optimized_size, "
-                                  "runtime_seconds, file_status) "
-                                  "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                             [foli[thisFolder], fileName,
-                                                    fileExt, fileSize,
-                                                    datetime.now(), -1,
-                                                    datetime.now(), fileExt,
-                                                    fileSize, -1, 1])
-                        print("Added file \"{}\" to folder \"{}\" as done"
-                              .format(File, thisFolder))
-                    elif get[0] == 1 and get[1] == 0:
-                        c.execute("UPDATE folder_optimize_file "
-                                  "SET optimize_pid = ?,"
-                                  "optimization_started_at = ?,"
-                                  "optimized_extension = ?,"
-                                  "optimized_size = ?, runtime_seconds = ?,"
-                                  "file_status = ? "
-                                  "WHERE real_folder_id = ? "
-                                  "AND file_name = ?", [-1, datetime.now(),
-                                                        fileExt, fileSize, -1,
-                                                        1, foli[thisFolder],
-                                                                fileName])
-                        print("File \"{}\" in folder \"{}\" changed to "
-                              "optimized".format(File, thisFolder))
-                    else:
-                        print("File \"{}\" in folder \"{}\" already optimized"
-                              .format(File, thisFolder))
+                markFileAsDone(c, foli[thisFolder], thisFolder, File)
 
 
     conn.commit()
@@ -502,10 +576,15 @@ def IdentifyNewRealFolders(c):
     """
     Based on watch folders generate list of real folders
     """
-    for row in c.execute("SELECT watch_folder_id, watch_folder_name "
-                         "FROM watch_folder"):
-        for root, dirs, files in os.walk(row[1]):
-            InsertNewRealFolder(c, row[0], root)
+    c.execute("SELECT watch_folder_id, watch_folder_name, "
+              "recursive_yn FROM watch_folder")
+    watchFolders = c.fetchall()
+    for row in watchFolders:
+        if row[2] == 0:
+            InsertNewRealFolder(c, row[0], row[1])
+        elif row[2] == 1:
+            for root, dirs, files in os.walk(row[1]):
+                InsertNewRealFolder(c, row[0], root)
 
 
 def IdentifyNewFiles(databasename):
@@ -578,3 +657,4 @@ if __name__ == '__main__':
         IdentifyNewFiles(databasename)
     elif args.command in ("statistics", "stats", "stat", "s"):
         IdentifyNewFiles(databasename)
+
