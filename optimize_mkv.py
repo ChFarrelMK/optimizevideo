@@ -146,58 +146,54 @@ def InitializeDatabase(databasename):
 
     c = conn.cursor()
     c.execute("CREATE TABLE repository_version ("
-              "version_number UNSIGNED INTEGER NOT NULL PRIMARY KEY) "
-              "WITHOUT ROWID")
+              "version_number UNSIGNED INTEGER NOT NULL PRIMARY KEY)")
     c.execute("CREATE TRIGGER NMR_repository_version BEFORE INSERT "
               "ON repository_version WHEN (SELECT COUNT(*) "
               "FROM repository_version) >= 1 BEGIN "
               "SELECT RAISE(FAIL, 'Only one row allowed!'); END")
     c.execute("CREATE TABLE watch_folder ("
-              "watch_folder_id UNSIGNED INTEGER NOT NULL PRIMARY KEY "
-              "AUTOINCREMENT, "
+              "watch_folder_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
               "watch_folder_name TEXT NOT NULL, "
               "recursive_yn UNSIGNED TINYINT NOT NULL DEFAULT 1 "
-              "CHECK(recursive_yn in (0, 1))) WITHOUT ROWID")
+              "CHECK(recursive_yn in (0, 1)))")
     c.execute("CREATE TABLE real_folder ("
-              "real_folder_id UNSIGNED INTEGER NOT NULL PRIMARY KEY "
-              "AUTOINCREMENT, "
-              "watch_folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
-              "watch_folder (watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
-              "real_folder_name TEXT NOT NULL "
-              "UNIQUE(real_folder_name)) WITHOUT ROWID")
+              "real_folder_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
+              "watch_folder_id INTEGER NOT NULL REFERENCES watch_folder "
+              "(watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
+              "real_folder_name TEXT NOT NULL, "
+              "UNIQUE(real_folder_name))")
     c.execute("CREATE TABLE folder_ignore_extension ("
-              "watch_folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
-              "watch_folder (watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
+              "watch_folder_id INTEGER NOT NULL REFERENCES watch_folder "
+              "(watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "ignore_extension TEXT NOT NULL, "
-              "PRIMARY KEY (watch_folder_id, ignore_extension)) WITHOUT ROWID")
+              "PRIMARY KEY (watch_folder_id, ignore_extension))")
     c.execute("CREATE TABLE folder_optimize_file ("
-              "real_folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
-              "watch_folder (watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
+              "real_folder_id INTEGER NOT NULL REFERENCES real_folder "
+              "(real_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "file_name TEXT NOT NULL, original_extension TEXT NOT NULL, "
               "original_size UNSIGNED BIGINT NOT NULL, "
               "original_first_seen_at TEXT NOT NULL, optimize_pid INTEGER, "
               "optimization_started_at TEXT, optimized_extension TEXT, "
               "optimized_size UNSIGNED BIGINT, runtime_seconds INTEGER, "
               "file_status TINYINT NOT NULL, "
-              "PRIMARY KEY (watch_folder_id, file_name)) WITHOUT ROWID")
+              "PRIMARY KEY (real_folder_id, file_name))")
     c.execute("CREATE TABLE folder_option ("
-              "watch_folder_id UNSIGNED INTEGER NOT NULL REFERENCES "
-              "watch_folder (watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
+              "watch_folder_id INTEGER NOT NULL REFERENCES watch_folder "
+              "(watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "folder_option TEXT NOT NULL, "
-              "PRIMARY KEY (watch_folder_id, folder_option)) WITHOUT ROWID")
+              "PRIMARY KEY (watch_folder_id, folder_option))")
     c.execute("CREATE TABLE optimization_default_option ("
-              "default_option TEXT PRIMARY KEY NOT NULL) WITHOUT ROWID")
+              "default_option TEXT PRIMARY KEY NOT NULL)")
     c.execute("CREATE TABLE current_running ("
               "started_at TEXT NOT NULL PRIMARY KEY, "
-              "pid UNSIGNED INTEGER NOT NULL) WITHOUT ROWID")
-    c.execute("CREATE TABLE message (message_text TEXT NOT NULL PRIMARY KEY) "
-              "WITHOUT ROWID")
+              "pid UNSIGNED INTEGER NOT NULL)")
+    c.execute("CREATE TABLE message (message_text TEXT NOT NULL PRIMARY KEY)")
     c.execute("CREATE TRIGGER NMR_message BEFORE INSERT ON message "
               "WHEN (SELECT COUNT(*) FROM message) >= 1 BEGIN "
               "SELECT RAISE(FAIL, 'Only one row allowed!'); END")
     c.execute("CREATE TABLE application_option ("
               "option_key TEXT NOT NULL PRIMARY KEY, "
-              "option_value TEXT NOT NULL) WITHOUT ROWID")
+              "option_value TEXT NOT NULL)")
     c.execute("INSERT INTO repository_version (version_number) "
               "VALUES (?)", [current_repository_version, ])
     c.executemany("INSERT INTO optimization_default_option VALUES (?)",
@@ -236,6 +232,34 @@ def OpenReadDatabase(databasename):
     return(conn, c)
 
 
+def checkWatchFolderExists(c, checkFolder):
+    # First, check tree if already a watch folder
+    folderFound = False
+
+    c.execute("SELECT COUNT(*) FROM watch_folder "
+              "WHERE watch_folder_name like ?", [checkFolder + '%'])
+
+    if c.fetchone()[0]:
+        print("Subfolder of \"{}\" is already in watch list"
+              .format(checkFolder))
+        folderFound = True
+
+    while checkFolder:
+        c.execute("SELECT COUNT(*) FROM watch_folder "
+                  "WHERE watch_folder_name = ?", [checkFolder])
+        if not c.fetchone():
+            print("Folder \"{}\" is part of other folder already "
+                  "in watch list".format(checkFolder))
+            checkFolder = False
+            folderFound = True
+        else:
+            checkFolder, tail = os.path.split(checkFolder)
+            if not tail:
+                checkFolder = False
+
+    return(folderFound)
+
+
 def Configuration(databasename):
     """
     Manipulate configuration directly in database file.
@@ -262,8 +286,8 @@ def Configuration(databasename):
             if c.fetchone()[0] != 1:
                 print("Folder \"{}\" is not not in watch list", [thisFolder])
             else:
-                c.execute("DELETE FROM watch_folder WHERE watch_folder_name = ?",
-                          [thisFolder])
+                c.execute("DELETE FROM watch_folder "
+                          "WHERE watch_folder_name = ?", [thisFolder])
                 print("Deleted folder \"{}\" from watch list including all "
                       "related data".format(thisFolder))
 
@@ -273,27 +297,15 @@ def Configuration(databasename):
             c.execute("SELECT COUNT(*) FROM watch_folder "
                       "WHERE watch_folder_name = ?", [thisFolder])
             if c.fetchone()[0] > 0:
-                print("Folder {} is already in watch list".format(thisFolder))
+                print("Folder \"{}\" is already in watch list"
+                      .format(thisFolder))
             else:
-                # First, check tree if already a watch folder
-                checkFolder, tail = os.path.split(thisFolder)
-                while checkFolder:
-                    c.execute("SELECT COUNT(*) FROM watch_folder "
-                              "WHERE watch_folder_name = ?", [checkFolder])
-                    if c.fetchone():
-                        print("Folder \"{}\" is part of other folder already in "
-                              "watch list")
-                        checkFolder = False
-                    else:
-                        checkFolder, tail = os.path.split(checkFolder)
-
-                if checkFolder:
-                    # now, we need to end this iteration and do nothing
+                if checkWatchFolderExists(c, os.path.split(thisFolder)[0]):
                     continue
 
                 c.execute("INSERT INTO watch_folder (watch_folder_name) "
                           "VALUES (?)", [thisFolder])
-                          currentRowId = c.lastrowid
+                currentRowId = c.lastrowid
                 print("Added folder \"{}\" to watch list".format(thisFolder))
                 # Always add extension "log" to new folder automatically
                 c.execute("INSERT INTO folder_ignore_extension ("
@@ -381,7 +393,8 @@ def Configuration(databasename):
                     c.execute("INSERT INTO folder_option (watch_folder_id, "
                               "folder_option) SELECT watch_folder_id, ? "
                               "FROM watch_folder "
-                              "WHERE watch_folder_name = ?", [Option, thisFolder])
+                              "WHERE watch_folder_name = ?",
+                              [Option, thisFolder])
                     print("Added option \"{}\" to "
                           "folder \"{}\"".format(Option, thisFolder))
                 else:
@@ -471,28 +484,28 @@ def GetWatchFolderId(folderName):
     return(c.fetchone[0])
 
 
-def InsertNewRealFolder(watchFolderId, folderName):
+def InsertNewRealFolder(c, watchFolderId, folderName):
     """
     Check if folder already exists and insert if not
     """
     c.execute("SELECT 1 FROM real_folder "
-              "WHERE watch_folder_id = ? AND name = ?",
-              [row[0], folderName])
+              "WHERE watch_folder_id = ? AND real_folder_name = ?",
+              [watchFolderId, folderName])
     if not c.fetchone():
         c.execute("INSERT INTO real_folder ("
                   "watch_folder_id, real_folder_name) "
                   "VALUES (?, ?)",
-                  [row[0], folderName])
+                  [watchFolderId, folderName])
 
 
-def IdentifyNewRealFolders:
+def IdentifyNewRealFolders(c):
     """
     Based on watch folders generate list of real folders
     """
     for row in c.execute("SELECT watch_folder_id, watch_folder_name "
                          "FROM watch_folder"):
         for root, dirs, files in os.walk(row[1]):
-            InsertNewRealFolder(row[0], root)
+            InsertNewRealFolder(c, row[0], root)
 
 
 def IdentifyNewFiles(databasename):
@@ -506,32 +519,39 @@ def IdentifyNewFiles(databasename):
     c.execute("PRAGMA FOREIGN_KEYS = ON")
 
     # First, check if new folders have been created below our watch folders
-    IdentifyNewRealFolders
+    IdentifyNewRealFolders(c)
 
-    for row in c.execute("SELECT real_folder_id, watch_folder_id, real_folder_name "
-                         "FROM real_folder"):
+    c.execute("SELECT real_folder_id, watch_folder_id, real_folder_name "
+              "FROM real_folder")
+
+    watchFolders = c.fetchall();
+
+    for real_folder_id, watch_folder_id, real_folder_name in watchFolders:
         ignoreExtensions = []
 
         for row2 in c.execute("SELECT ignore_extension "
                               "FROM folder_ignore_extension "
-                              "WHERE watch_folder_id = ?", [row[1], ]):
-            ignoreExtensions.append(row2[0])
+                              "WHERE watch_folder_id = ?",
+                              [watch_folder_id, ]):
+            ignoreExtensions.append(real_folder_id)
 
-        for File in os.listdir(row[1]):
+        for File in os.listdir(real_folder_name):
             if (os.path.splitext(File)[1][1:] not in ignoreExtensions
-                    and not File.startswith(".")):
+                    and not File.startswith(".")
+                    and os.path.isfile(os.path.join(real_folder_name, File))):
                 c.execute("SELECT 1 FROM folder_optimize_file "
                           "WHERE real_folder_id = ? AND file_name = ?",
-                          [row[0], os.path.splitext(File)[0]])
+                          [real_folder_id, os.path.splitext(File)[0]])
                 if not c.fetchone():
-                    fileSize = os.path.getsize(os.path.join(row[1], File))
+                    fileSize = os.path.getsize(os.path.join(real_folder_name,
+                                                            File))
                     try:
                         c.execute("INSERT INTO folder_optimize_file ("
                                   "real_folder_id, file_name, "
                                   "original_extension, "
                                   "original_first_seen_at, original_size, "
                                   "file_status) VALUES (?, ?, ?, ?, ?, ?)",
-                                  [row[0], os.path.splitext(File)[0],
+                                  [real_folder_id, os.path.splitext(File)[0],
                                     datetime.now(),
                                     os.path.splitext(File)[1][1:],
                                     fileSize, 0])
@@ -540,7 +560,7 @@ def IdentifyNewFiles(databasename):
                               "Deleted in the meantime?")
                     else:
                         print("Added file \"{}\" in folder \"{}\" to optimize "
-                              "list".format(File, row[1]))
+                              "list".format(File, real_folder_name))
 
     conn.commit()
     conn.close()
