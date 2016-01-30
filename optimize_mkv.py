@@ -43,20 +43,22 @@
 # Do not change this value unless you know what you're doing
 current_repository_version = 1
 
-# Define initial default values for process arguments
-optimization_default_options = [
-    ("ffmpeg", 0),      # program to be executed
-    ("-i", 10),
-    ("INPUTFILE", 11),  # is an implicit term to be replaced with input file
-    ("-c:v", 20),
-    ("libx265", 21),    # HEVC
-    ("-crf", 30),
-    ("20", 31),         # high quality
-    ("-c:a", 40),
-    ("copy", 41),
-    ("-map", 50),
-    ("0", 51),
-    ("OUTPUTFILE", 100) # is an implicit term to be replaced with output file
+# Define initial default values for process command with options
+# Use unique number to indicate the specific options
+# With this id, the defaults can be overwritting be folder definition
+default_options = [
+    (  0, "ffmpeg"),     # program to be executed
+    ( 10, "-i"),
+    ( 11, "INPUTFILE"),  # is an implicit term to be replaced with input file
+    ( 20, "-c:v"),
+    ( 21, "libx265"),    # HEVC
+    ( 30, "-crf"),
+    ( 31, "20"),         # high quality
+    ( 40, "-c:a"),
+    ( 41, "copy"),
+    ( 50, "-map"),
+    ( 51, "0"),
+    (100, "OUTPUTFILE") # is an implicit term to be replaced with output file
 ]
 
 # Define initial default values for application
@@ -91,16 +93,16 @@ parser_conf_group1.add_argument('-F', '--delete-folder', action='store_true',
                                'on provided options')
 parser_conf.add_argument('-o', '--add-option-folder', metavar='option_folder',
                          action='store', nargs="+",
-                         help='Add option(s) (with value(s)) to the provided '
-                         'folder(s)')
+                         help='Add option(s) to the provided folder(s). '
+                         'Use "id:value" and align it to default options')
 parser_conf.add_argument('-O', '--delete-option-folder',
                          metavar='option_folder', action='store', nargs="+",
-                         help='Delete option(s) (with value(s)) from the '
-                         'provided folder(s)')
+                         help='Delete option(s) by id from the provided '
+                         'folder(s)')
 parser_conf.add_argument('-d', '--add-default-option',
                          metavar='default_option', action='store', nargs="+",
-                         help='Add default option(s) (with value(s)) for all '
-                         'executions')
+                         help='Add default option(s) for all executions. '
+                         'Use "id:value" and align it to existing options')
 parser_conf.add_argument('-D', '--delete-default-option',
                          metavar='default_option', action='store', nargs="+",
                          help='Delete default option(s) from all executions')
@@ -191,13 +193,12 @@ def InitializeDatabase(databasename):
     c.execute("CREATE TABLE folder_option ("
               "watch_folder_id INTEGER NOT NULL REFERENCES watch_folder "
               "(watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
-              "folder_option TEXT NOT NULL, "
-              "sort_order INTEGER NOT NULL, "
-              "PRIMARY KEY (watch_folder_id, folder_option), "
-              "UNIQUE (watch_folder_id, sort_order))")
-    c.execute("CREATE TABLE optimization_default_option ("
-              "default_option TEXT PRIMARY KEY NOT NULL, "
-              "sort_order INTEGER NOT NULL UNIQUE)")
+              "folder_option_id INTEGER NOT NULL, "
+              "folder_option TEXT, "
+              "PRIMARY KEY (watch_folder_id, folder_option_id))")
+    c.execute("CREATE TABLE default_option ("
+              "default_option_id INTEGER NOT NULL PRIMARY KEY, "
+              "default_option TEXT NOT NULL)")
     c.execute("CREATE TABLE current_running ("
               "started_at TEXT NOT NULL PRIMARY KEY, "
               "pid UNSIGNED INTEGER NOT NULL)")
@@ -210,11 +211,11 @@ def InitializeDatabase(databasename):
               "option_value TEXT NOT NULL)")
     c.execute("INSERT INTO repository_version (version_number) "
               "VALUES (?)", [current_repository_version, ])
-    c.executemany("INSERT INTO optimization_default_option VALUES (?, ?)",
-                  optimization_default_options)
-    for Option in optimization_default_options:
-        print("Added default option \"{}\" to all executions"
-              .format(Option[0]))
+    c.executemany("INSERT INTO default_option VALUES (?, ?)",
+                  default_options)
+    for Option in default_options:
+        print("Added default option \"{}\" with value \"{}\""
+              .format(Option[0], Option[1]))
     for key, value in default_application_options.items():
         c.execute("INSERT INTO application_option VALUES (?, ?)", (key, value))
         print("Added application option \"{}\" = \"{}\"".format(key, value))
@@ -257,7 +258,7 @@ def checkWatchFolderExists(c, checkFolder):
     return(folderFound)
 
 
-def deleteWatchFolder():
+def deleteWatchFolder(c, thisFolder):
     """
     Check if watch folder exists and delete if
     With enabled foreign keys, all subsidiary will be deleted as well
@@ -266,7 +267,7 @@ def deleteWatchFolder():
     c.execute("SELECT COUNT(*) FROM watch_folder "
               "WHERE watch_folder_name = ?", [thisFolder])
     if c.fetchone()[0] != 1:
-        print("Folder \"{}\" is not not in watch list", [thisFolder])
+        print("Folder \"{}\" is not not in watch list".format(thisFolder))
     else:
         c.execute("DELETE FROM watch_folder "
                   "WHERE watch_folder_name = ?", [thisFolder])
@@ -351,51 +352,139 @@ def insertNewIgnoreExtension(c, thisFolder, Ext):
               "folder \"{}\"".format(Ext, thisFolder))
 
 
+def deleteDefaultOption(c, Option):
+    """
+    Check if default option exists and delete
+    """
+
+    if ":" in Option:
+        thisOptionId, thisOption = Option.split(":")
+    else:
+        thisOptionId = Option
+        thisOption = ""
+
+    c.execute("SELECT 1 FROM default_option "
+              "WHERE default_option_id = ? ", [thisOptionId])
+    if c.fetchone():
+        c.execute("DELETE FROM default_option "
+                  "WHERE default_option_id = ?", [thisOptionId])
+        print("Deleted default option \"{}\"".format(thisOptionId))
+    else:
+        print("Default option \"{}\" does not exist".format(thisOptionId))
+
+
+def insertNewDefaultOption(c, Option):
+    """
+    Check if default option already exists and insert if not
+    """
+
+    thisOptionId = False
+
+    if ":" in Option:
+        thisOptionId, thisOption = Option.split(":")
+        if not thisOption:
+            unset(thisOptionId)
+            print("Error, default option \"{}\" must have a value"
+                  .format(Option))
+    else:
+        print("Error, default option \"{}\" must have a value".format(Option))
+
+    if thisOptionId:
+        c.execute("SELECT 1 FROM default_option "
+                  "WHERE default_option_id = ? ", [thisOptionId])
+        if not c.fetchone():
+            c.execute("INSERT INTO default_option ("
+                      "default_option_id, default_option) "
+                      "VALUES (?, ?)",
+                      [thisOptionId, thisOption])
+            print("Added default option \"{}\" with value "
+                  "\"{}\"".format(thisOptionId, thisOption))
+        else:
+            c.execute("UPDATE default_option "
+                      "SET default_option = ?"
+                      "WHERE default_option_id = ?",
+                      [thisOption, thisOptionId])
+            print("Default option \"{}\" changed to value \"{}\""
+                  .format(thisOptionId, thisOption))
+
+
 def deleteFolderOption(c, thisFolder, Option):
     """
-    Check if folder option exists for given folder and delete if
+    Check if folder option exists for given folder and delete
     """
 
-    c.execute("SELECT 1 FROM watch_folder AS a "
-              "JOIN folder_option AS b "
-              "ON a.watch_folder_id = b.watch_folder_id "
-              "WHERE a.watch_folder_name = ? "
-              "AND b.folder_option = ? ", [thisFolder, Option])
+    thisFolderId = GetWatchFolderId(c, thisFolder)
+
+    if ":" in Option:
+        thisOptionId, thisOption = Option.split(":")
+    else:
+        thisOptionId = Option
+        thisOption = ""
+
+    c.execute("SELECT 1 FROM folder_option "
+              "WHERE watch_folder_id = ? "
+              "AND folder_option_id = ? ", [thisFolderId, thisOptionId])
     if c.fetchone():
         c.execute("DELETE FROM folder_option "
-                  "WHERE watch_folder_id = ("
-                  "SELECT watch_folder_id "
-                  "FROM watch_folder WHERE watch_folder_name = ?) "
-                  "AND folder_option = ?", [thisFolder, Option])
+                  "WHERE watch_folder_id = ? "
+                  "AND folder_option_id = ?", [thisFolderId, thisOptionId])
         print("Deleted option \"{}\" from "
-              "folder \"{}\"".format(Option, thisFolder))
+              "folder \"{}\"".format(thisOptionId, thisFolder))
     else:
         print("Folder option \"{}\" does not exist for "
-              "folder \"{}\"".format(Option, thisFolder))
+              "folder \"{}\"".format(thisOptionId, thisFolder))
 
 
-def InsertNewFolderOption(c, thisFolder, Option):
+def insertNewFolderOption(c, thisFolder, Option):
     """
     Check if given folder option in watch folder already exists and
     insert if not
     """
 
-    c.execute("SELECT 1 FROM watch_folder AS a "
-              "JOIN folder_option AS b "
-              "ON a.watch_folder_id = b.watch_folder_id "
-              "WHERE a.watch_folder_name = ? "
-              "AND b.folder_option = ? ", [thisFolder, Option])
-    if not c.fetchone():
-        c.execute("INSERT INTO folder_option (watch_folder_id, "
-                  "folder_option) SELECT watch_folder_id, ? "
-                  "FROM watch_folder "
-                  "WHERE watch_folder_name = ?",
-                  [Option, thisFolder])
-        print("Added option \"{}\" to "
-              "folder \"{}\"".format(Option, thisFolder))
+    thisFolderId = GetWatchFolderId(c, thisFolder)
+
+    if ":" in Option:
+        thisOptionId, thisOption = Option.split(":")
     else:
-        print("Folder option \"{}\" already exists for "
-              "folder \"{}\"".format(Option, thisFolder))
+        thisOptionId = Option
+        thisOption = ""
+
+    if thisOptionId and thisOption:
+        c.execute("SELECT 1 FROM folder_option "
+                  "WHERE watch_folder_id = ? "
+                  "AND folder_option_id = ? ", [thisFolderId, thisOptionId])
+        if not c.fetchone():
+            c.execute("INSERT INTO folder_option (watch_folder_id, "
+                      "folder_option_id, folder_option) "
+                      "VALUES (?, ?, ?)",
+                      [thisFolderId, thisOptionId, thisOption])
+            print("Added option \"{}\" with value \"{}\" to "
+                  "folder \"{}\"".format(thisOptionId, thisOption, thisFolder))
+        else:
+            c.execute("UPDATE folder_option "
+                      "SET folder_option = ?"
+                      "WHERE watch_folder_id = ? AND folder_option_id = ?",
+                      [thisOption, thisFolderId, thisOptionId])
+            print("Folder option \"{}\" replaced with value \"{}\" for "
+                  "folder \"{}\"".format(thisOptionId, thisOption, thisFolder))
+    elif thisOptionId and not thisOption:
+        c.execute("SELECT 1 FROM folder_option "
+                  "WHERE watch_folder_id = ? "
+                  "AND folder_option_id = ? ", [thisFolderId, thisOptionId])
+        if not c.fetchone():
+            c.execute("INSERT INTO folder_option (watch_folder_id, "
+                      "folder_option_id) "
+                      "VALUES (?, ?)",
+                      [thisFolderId, thisOptionId])
+            print("Added option \"{}\" to with no value to "
+                  "folder \"{}\"".format(thisOptionId, thisFolder))
+        else:
+            c.execute("UPDATE folder_option "
+                      "SET folder_option = NULL "
+                      "WHERE watch_folder_id = ? AND folder_option_id = ?",
+                      [thisFolderId, thisOptionId])
+            print("Folder option \"{}\" unset for "
+                  "folder \"{}\"".format(thisOptionId, thisFolder))
 
 
 def markFileAsDone(c, real_folder_id, thisFolder, File):
@@ -489,6 +578,16 @@ def Configuration(databasename):
             for Ext in args.add_ignore_extension_folder:
                 insertNewIgnoreExtension(c, thisFolder, Ext)
 
+    # Delete default option(s)
+    if (args.delete_default_option):
+        for Option in args.delete_default_option:
+            deleteDefaultOption(c, Option)
+
+    # insert default option(s)
+    if args.add_default_option:
+        for Option in args.add_default_option:
+            insertNewDefaultOption(c, Option)
+
     # Delete option(s) from watch folder
     if (folderlist and args.delete_option_folder
             and args.delete_folder == False):
@@ -500,18 +599,18 @@ def Configuration(databasename):
     if folderlist and args.add_option_folder and args.delete_folder == False:
         for thisFolder in folderlist:
             for Option in args.add_option_folder:
-                InsertNewFolderOption(c, thisFolder, Option)
+                insertNewFolderOption(c, thisFolder, Option)
 
     # Find files and mark them based on extension as done
     if args.add_extension_as_done:
         foli = {}
         if folderlist:
-            for row in c.execute("SELECT real_folder_id, real_folder_name, "
+            for row in c.execute("SELECT real_folder_id, real_folder_name "
                                  "FROM real_folder"):
                 if row[1] in folderlist:
                     foli[row[1]] = row[0]
         else:
-            for row in c.execute("SELECT real_folder_id, real_folder_name, "
+            for row in c.execute("SELECT real_folder_id, real_folder_name "
                                  "FROM real_folder"):
                 foli[row[1]] = row[0]
 
@@ -524,7 +623,7 @@ def Configuration(databasename):
     conn.close()
 
 
-def GetWatchFolderId(folderName):
+def GetWatchFolderId(c, folderName):
     """
     Search for foldername and return id of watch folder
     """
@@ -532,7 +631,7 @@ def GetWatchFolderId(folderName):
               "WHERE watch_folder_name = ?",
               [folderName])
 
-    return(c.fetchone[0])
+    return(c.fetchone()[0])
 
 
 def InsertNewRealFolder(c, watchFolderId, folderName):
@@ -582,24 +681,24 @@ def IdentifyNewFiles(databasename):
 
     watchFolders = c.fetchall();
 
-    for real_folder_id, watch_folder_id, real_folder_name in watchFolders:
+    for thisRealFolderId, thisWatchFolderId, thisRealFolderName in watchFolders:
         ignoreExtensions = []
 
         for row2 in c.execute("SELECT ignore_extension "
                               "FROM folder_ignore_extension "
                               "WHERE watch_folder_id = ?",
-                              [watch_folder_id, ]):
-            ignoreExtensions.append(real_folder_id)
+                              [thisWatchFolderId, ]):
+            ignoreExtensions.append(row2[0])
 
-        for File in os.listdir(real_folder_name):
+        for File in os.listdir(thisRealFolderName):
             if (os.path.splitext(File)[1][1:] not in ignoreExtensions
                     and not File.startswith(".")
-                    and os.path.isfile(os.path.join(real_folder_name, File))):
+                    and os.path.isfile(os.path.join(thisRealFolderName, File))):
                 c.execute("SELECT 1 FROM folder_optimize_file "
                           "WHERE real_folder_id = ? AND file_name = ?",
-                          [real_folder_id, os.path.splitext(File)[0]])
+                          [thisRealFolderId, os.path.splitext(File)[0]])
                 if not c.fetchone():
-                    fileSize = os.path.getsize(os.path.join(real_folder_name,
+                    fileSize = os.path.getsize(os.path.join(thisRealFolderName,
                                                             File))
                     try:
                         c.execute("INSERT INTO folder_optimize_file ("
@@ -607,7 +706,7 @@ def IdentifyNewFiles(databasename):
                                   "original_extension, "
                                   "original_first_seen_at, original_size, "
                                   "file_status) VALUES (?, ?, ?, ?, ?, ?)",
-                                  [real_folder_id, os.path.splitext(File)[0],
+                                  [thisRealFolderId, os.path.splitext(File)[0],
                                     os.path.splitext(File)[1][1:],
                                     datetime.now(),
                                     fileSize, 0])
@@ -616,7 +715,7 @@ def IdentifyNewFiles(databasename):
                               "Deleted in the meantime?")
                     else:
                         print("Added file \"{}\" in folder \"{}\" to optimize "
-                              "list".format(File, real_folder_name))
+                              "list".format(File, thisRealFolderName))
 
     conn.commit()
     conn.close()
@@ -684,8 +783,8 @@ def loadDefaultOption(conn, c):
     """
     defaultOption = {}
 
-    c.execute("SELECT default_option, sort_order "
-              "FROM optimization_default_option")
+    c.execute("SELECT default_option, default_option_id "
+              "FROM default_option")
     for thisOption, id in c.fetchall():
         if thisOption:
             defaultOption[id] = thisOption
@@ -693,16 +792,17 @@ def loadDefaultOption(conn, c):
     return(defaultOption)
 
 
-def loadFolderOption(c, thisWatchFolder):
+def loadFolderOption(c, thisWatchFolderId):
     """
     Load folder specific folder option to (probably) overwrite defaults
     """
     folderOption = {}
 
-    c.execute("SELECT folder_option, sort_order FROM folder_option")
+    c.execute("SELECT folder_option, folder_option_id FROM folder_option "
+              "WHERE watch_folder_id = ?", [thisWatchFolderId])
+
     for thisOption, id in c.fetchall():
-        if thisOption:
-            folderOption[id] = thisOption
+        folderOption[id] = thisOption
 
     return(folderOption)
 
@@ -720,8 +820,19 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
     logfile = os.path.join(thisRealFolderName, thisFileName + ".log")
     inpfile = os.path.join(thisRealFolderName, thisFileName + "." +
                            thisOriginalExtension)
-    outfile = os.path.join(thisRealFolderName, thisFileName + ".tmp." +
+    tgtfile = os.path.join(thisRealFolderName, thisFileName +
                            applicationOption["target_extension"])
+    outfile = os.path.join(thisRealFolderName, thisFileName + ".tmp")
+
+    if os.path.isfile(logfile):
+        print("Logfile \"{}\" already exists!".format(logfile))
+        return
+    if os.path.isfile(outfile):
+        print("Temporary file \"{}\" already exists!".format(outfile))
+        return
+    if os.path.isfile(tgtfile) and inpfile != tgtfile:
+        print("Target file \"{}\" already exists!".format(tgtfile))
+        return
 
     if os.path.isfile(os.path.join(thisRealFolderName, thisFileName + "." +
                  thisOriginalExtension)):
@@ -742,29 +853,58 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                   [datetime.now(), applicationOption["target_extension"], 2,
                   thisRealFolderId, thisFileName])
         conn.commit()
+
         start = time.time()
-        return
 
-        if subprocess.call(execOptions):
-            runtime = time.time() - start
-            print("Error processing file \"{}\"".format(inpfile))
-            c.execute("UPDATE folder_optimize_file "
-                      "SET file_status = ?, runtime_seconds = ? "
-                      "WHERE real_folder_id = ? AND file_name = ?",
-                      [99, runtime, thisRealFolderId, thisFileName])
+        try:
+            log = open(logfile, 'w')
+        except IOError:
+            print("Error, cannot create logfile {}".format(logfile))
         else:
-            runtime = time.time() - start
-            fileSize = os.path.getsize(outfile)
-            c.execute("UPDATE folder_optimize_file "
-                      "SET file_status = ?, runtime_seconds = ?, "
-                      "    optimized_size = ? "
-                      "WHERE real_folder_id = ? AND file_name = ?",
-                      [1, runtime, fileSize, thisRealFolderId, thisFileName])
+            if subprocess.call(execOptions, stdout=log,
+                               stderr=subprocess.STDOUT):
+                runtime = time.time() - start
+                print("Error processing file \"{}\"".format(inpfile))
+                c.execute("UPDATE folder_optimize_file "
+                          "SET file_status = ?, runtime_seconds = ? "
+                          "WHERE real_folder_id = ? AND file_name = ?",
+                          [99, runtime, thisRealFolderId, thisFileName])
+            else:
+                runtime = time.time() - start
+                fileSize = os.path.getsize(outfile)
+                c.execute("UPDATE folder_optimize_file "
+                          "SET file_status = ?, runtime_seconds = ?, "
+                          "    optimized_size = ? "
+                          "WHERE real_folder_id = ? AND file_name = ?",
+                          [1, runtime, fileSize, thisRealFolderId,
+                             thisFileName])
 
+                try:
+                    os.remove(inpfile)
+                except:
+                    print("Error, cannot remove ori file "
+                          "\"{}\"!".format(inpfile))
+                else:
+                    try:
+                        os.rename(outfile, tgtfile)
+                    except:
+                        print("Error, cannot rename temp file to ori file "
+                              "\"{}\"!".format(outfile))
+                    else:
+                        log.close()
+                        try:
+                            os.remove(logfile)
+                        except:
+                            print("Error, cannot remove logfile \"{}\"!"
+                                  .format(logfile))
+
+        log.close()
         conn.commit()
 
     else:
-        print("File not found: {}, {}, {}!".format(thisFileName, thisRealFolderName, thisOriginalExtension))
+        print("File not found: {}, {}, {}!".format(thisFileName,
+                                                   thisRealFolderName,
+                                                   thisOriginalExtension))
 
 
 def processRealFolder(conn, thisRealFolderId, thisRealFolderName, Options,
@@ -785,7 +925,7 @@ def processRealFolder(conn, thisRealFolderId, thisRealFolderName, Options,
                     thisOriginalExtension, Options, applicationOption)
 
 
-def processWatchFolder(conn, thisWatchFolder, defaultOption,
+def processWatchFolder(conn, thisWatchFolderId, defaultOption,
                        applicationOption):
     """
     Now processing one watch folder. Read in folder specific options.
@@ -798,14 +938,17 @@ def processWatchFolder(conn, thisWatchFolder, defaultOption,
     Options = defaultOption
 
     # need to merge default options with folder Options
-    for key, value in loadFolderOption(c, thisWatchFolder).items():
-        Options[key] = value
+    for key, value in loadFolderOption(c, thisWatchFolderId).items():
+        if value:
+            Options[key] = value
+        elif key in Options:
+            del Options[key]
 
     c.execute("SELECT real_folder_id, real_folder_name "
               "FROM real_folder "
               "WHERE watch_folder_id = ? "
               "ORDER BY real_folder_name",
-              [thisWatchFolder])
+              [thisWatchFolderId])
 
     for thisRealFolderId, thisRealFolderName in c.fetchall():
         processRealFolder(conn, thisRealFolderId, thisRealFolderName,
@@ -838,9 +981,9 @@ def Execution(databasename):
 
     c.execute("SELECT watch_folder_id FROM watch_folder "
               "ORDER BY watch_folder_name")
-    for thisWatchFolder in c.fetchall()[0]:
-        if thisWatchFolder:
-            processWatchFolder(conn, thisWatchFolder, defaultOption,
+    for thisWatchFolderId in c.fetchall()[0]:
+        if thisWatchFolderId:
+            processWatchFolder(conn, thisWatchFolderId, defaultOption,
                                applicationOption)
 
     c.execute("DELETE FROM current_running")
