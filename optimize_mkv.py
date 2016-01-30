@@ -45,21 +45,31 @@ current_repository_version = 1
 
 # Define initial default values for process arguments
 optimization_default_options = [
-    ("-c:v libx265",),   # HEVC
-    ("-crf 20",),        # high quality
-    ("-c:a copy",),
-    ("-map 0",)
+    ("ffmpeg", 0),      # program to be executed
+    ("-i", 10),
+    ("INPUTFILE", 11),  # is an implicit term to be replaced with input file
+    ("-c:v", 20),
+    ("libx265", 21),    # HEVC
+    ("-crf", 30),
+    ("20", 31),         # high quality
+    ("-c:a", 40),
+    ("copy", 41),
+    ("-map", 50),
+    ("0", 51),
+    ("OUTPUTFILE", 100) # is an implicit term to be replaced with output file
 ]
 
 # Define initial default values for application
-application_options = {"target_extension": "mkv"}
+default_application_options = {"target_extension": "mkv"}
 
 
 import os
 import sys
 from datetime import date, datetime
+import time
 import sqlite3
 import argparse
+import subprocess
 
 parser = argparse.ArgumentParser(description='Reencode video files with '
                                  'certain options')
@@ -145,8 +155,8 @@ def InitializeDatabase(databasename):
     print("")
 
     conn = sqlite3.connect(databasename)
-
     c = conn.cursor()
+
     c.execute("CREATE TABLE repository_version ("
               "version_number UNSIGNED INTEGER NOT NULL PRIMARY KEY)")
     c.execute("CREATE TRIGGER NMR_repository_version BEFORE INSERT "
@@ -162,8 +172,7 @@ def InitializeDatabase(databasename):
               "real_folder_id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
               "watch_folder_id INTEGER NOT NULL REFERENCES watch_folder "
               "(watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
-              "real_folder_name TEXT NOT NULL, "
-              "UNIQUE(real_folder_name))")
+              "real_folder_name TEXT NOT NULL UNIQUE)")
     c.execute("CREATE TABLE folder_ignore_extension ("
               "watch_folder_id INTEGER NOT NULL REFERENCES watch_folder "
               "(watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
@@ -174,7 +183,7 @@ def InitializeDatabase(databasename):
               "(real_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "file_name TEXT NOT NULL, original_extension TEXT NOT NULL, "
               "original_size UNSIGNED BIGINT NOT NULL, "
-              "original_first_seen_at TEXT NOT NULL, optimize_pid INTEGER, "
+              "original_first_seen_at TEXT NOT NULL, "
               "optimization_started_at TEXT, optimized_extension TEXT, "
               "optimized_size UNSIGNED BIGINT, runtime_seconds INTEGER, "
               "file_status TINYINT NOT NULL, "
@@ -183,9 +192,12 @@ def InitializeDatabase(databasename):
               "watch_folder_id INTEGER NOT NULL REFERENCES watch_folder "
               "(watch_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "folder_option TEXT NOT NULL, "
-              "PRIMARY KEY (watch_folder_id, folder_option))")
+              "sort_order INTEGER NOT NULL, "
+              "PRIMARY KEY (watch_folder_id, folder_option), "
+              "UNIQUE (watch_folder_id, sort_order))")
     c.execute("CREATE TABLE optimization_default_option ("
-              "default_option TEXT PRIMARY KEY NOT NULL)")
+              "default_option TEXT PRIMARY KEY NOT NULL, "
+              "sort_order INTEGER NOT NULL UNIQUE)")
     c.execute("CREATE TABLE current_running ("
               "started_at TEXT NOT NULL PRIMARY KEY, "
               "pid UNSIGNED INTEGER NOT NULL)")
@@ -198,41 +210,16 @@ def InitializeDatabase(databasename):
               "option_value TEXT NOT NULL)")
     c.execute("INSERT INTO repository_version (version_number) "
               "VALUES (?)", [current_repository_version, ])
-    c.executemany("INSERT INTO optimization_default_option VALUES (?)",
+    c.executemany("INSERT INTO optimization_default_option VALUES (?, ?)",
                   optimization_default_options)
     for Option in optimization_default_options:
         print("Added default option \"{}\" to all executions"
               .format(Option[0]))
-    for key, value in application_options.items():
+    for key, value in default_application_options.items():
         c.execute("INSERT INTO application_option VALUES (?, ?)", (key, value))
         print("Added application option \"{}\" = \"{}\"".format(key, value))
     conn.commit()
     conn.close()
-
-
-def OpenReadDatabase(databasename):
-    """
-    Repository database exists. Read data into variables
-    """
-
-    conn = sqlite3.connect(databasename)
-    c = conn.cursor()
-    c.execute("PRAGMA FOREIGN_KEYS = ON")
-
-    # We do have a trigger to prevent this situation on table
-    # But to be sure!
-    c.execute("SELECT COUNT(*) FROM repository_version")
-    if c.fetchone()[0] != 1:
-        print("Error! Table \"repository_version\" does not contain only one "
-              "row as expected!")
-        sys.exit(1)
-
-    c.execute("SELECT version_number FROM repository_version")
-    if c.fetchone()[0] < current_repository_version:
-        # Database version is old, need to migrate to newest version
-        pass
-
-    return(conn, c)
 
 
 def checkWatchFolderExists(c, checkFolder):
@@ -432,27 +419,26 @@ def markFileAsDone(c, real_folder_id, thisFolder, File):
             c.execute("INSERT INTO folder_optimize_file ("
                       "real_folder_id, file_name, "
                       "original_extension, original_size, "
-                      "original_first_seen_at, optimize_pid, "
+                      "original_first_seen_at, "
                       "optimization_started_at, "
                       "optimized_extension, optimized_size, "
                       "runtime_seconds, file_status) "
                       "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                  [real_folder_id, fileName,
                                         fileExt, fileSize,
-                                        datetime.now(), -1,
+                                        datetime.now(),
                                         datetime.now(), fileExt,
                                         fileSize, -1, 1])
             print("Added file \"{}\" to folder \"{}\" as done"
                   .format(File, thisFolder))
         elif get[0] == 1 and get[1] == 0:
             c.execute("UPDATE folder_optimize_file "
-                      "SET optimize_pid = ?,"
-                      "optimization_started_at = ?,"
+                      "SET optimization_started_at = ?,"
                       "optimized_extension = ?,"
                       "optimized_size = ?, runtime_seconds = ?,"
                       "file_status = ? "
                       "WHERE real_folder_id = ? "
-                      "AND file_name = ?", [-1, datetime.now(),
+                      "AND file_name = ?", [datetime.now(),
                                             fileExt, fileSize, -1,
                                             1, real_folder_id,
                                                     fileName])
@@ -468,9 +454,7 @@ def Configuration(databasename):
     Manipulate configuration directly in database file.
     """
 
-    conn = sqlite3.connect(databasename)
-    c = conn.cursor()
-    c.execute("PRAGMA FOREIGN_KEYS = ON")
+    conn, c = openDatabase(databasename)
 
     folderlist = []
 
@@ -540,13 +524,6 @@ def Configuration(databasename):
     conn.close()
 
 
-def Execution():
-    """
-    Reading configuration database and process data in watch folders
-    """
-    pass
-
-
 def GetWatchFolderId(folderName):
     """
     Search for foldername and return id of watch folder
@@ -593,7 +570,7 @@ def IdentifyNewFiles(databasename):
     repository database.
     """
 
-    conn = sqlite3.connect(databasename)
+    conn, c = openDatabase(databasename)
     c = conn.cursor()
     c.execute("PRAGMA FOREIGN_KEYS = ON")
 
@@ -631,8 +608,8 @@ def IdentifyNewFiles(databasename):
                                   "original_first_seen_at, original_size, "
                                   "file_status) VALUES (?, ?, ?, ?, ?, ?)",
                                   [real_folder_id, os.path.splitext(File)[0],
-                                    datetime.now(),
                                     os.path.splitext(File)[1][1:],
+                                    datetime.now(),
                                     fileSize, 0])
                     except sqlite3.IntegrityError as e:
                         print("Ho, foreign key to real folder violated! "
@@ -640,6 +617,233 @@ def IdentifyNewFiles(databasename):
                     else:
                         print("Added file \"{}\" in folder \"{}\" to optimize "
                               "list".format(File, real_folder_name))
+
+    conn.commit()
+    conn.close()
+
+
+def databaseMigration(conn, c, oldVersion):
+    """
+    We have identified, the database version is old.
+    Start with doing the migration.
+    """
+    pass
+
+
+def openDatabase(databasename):
+    """
+    Every time we open the database, we check if a migration needs to
+    be done on it
+    """
+    conn = sqlite3.connect(databasename)
+    c = conn.cursor()
+    c.execute("PRAGMA FOREIGN_KEYS = ON")
+
+    c.execute("SELECT version_number FROM repository_version")
+    oldVersion = c.fetchone()[0]
+    if oldVersion < current_repository_version:
+        # Database version is old, need to migrate to newest version
+        databaseMigration(conn, c, oldVersion)
+
+    return(conn, c)
+
+
+def loadApplicationOption(conn, c):
+    """
+    For processing, we need some default options stored in table
+    """
+    applicationOption = {}
+
+    c.execute("select option_key, option_value from application_option")
+    for key, value in c.fetchall():
+        applicationOption[key] = value
+
+    return(applicationOption)
+
+
+def checkExecution(conn, c):
+    """
+    We can only have one process at a time, so check if one is already
+    running, and end gracefully if.
+    Mark as running if possible.
+    """
+    c.execute("SELECT started_at, pid FROM current_running")
+    if c.fetchone():
+        print("Process already running. Exit gracefully!")
+        sys.exit(0)
+
+    c.execute("INSERT INTO current_running (started_at, pid) VALUES"
+              "(?, ?)", [datetime.now(), os.getpid()])
+
+    conn.commit()
+
+
+def loadDefaultOption(conn, c):
+    """
+    Load default processing options to apply to every folder
+    """
+    defaultOption = {}
+
+    c.execute("SELECT default_option, sort_order "
+              "FROM optimization_default_option")
+    for thisOption, id in c.fetchall():
+        if thisOption:
+            defaultOption[id] = thisOption
+
+    return(defaultOption)
+
+
+def loadFolderOption(c, thisWatchFolder):
+    """
+    Load folder specific folder option to (probably) overwrite defaults
+    """
+    folderOption = {}
+
+    c.execute("SELECT folder_option, sort_order FROM folder_option")
+    for thisOption, id in c.fetchall():
+        if thisOption:
+            folderOption[id] = thisOption
+
+    return(folderOption)
+
+
+def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
+                thisOriginalExtension, Options, applicationOption):
+    """
+    Execute one file here
+    """
+    # new cursor here
+    c = conn.cursor()
+
+    execOptions = []
+
+    logfile = os.path.join(thisRealFolderName, thisFileName + ".log")
+    inpfile = os.path.join(thisRealFolderName, thisFileName + "." +
+                           thisOriginalExtension)
+    outfile = os.path.join(thisRealFolderName, thisFileName + ".tmp." +
+                           applicationOption["target_extension"])
+
+    if os.path.isfile(os.path.join(thisRealFolderName, thisFileName + "." +
+                 thisOriginalExtension)):
+        for key in sorted(Options):
+            if Options[key] == "INPUTFILE":
+                execOptions.append(inpfile)
+            elif Options[key] == "OUTPUTFILE":
+                execOptions.append(outfile)
+            else:
+                execOptions.append(Options[key])
+
+        print(execOptions)
+        c.execute("UPDATE folder_optimize_file "
+                  "SET optimization_started_at = ?, "
+                  "    optimized_extension = ?, "
+                  "    file_status = ? "
+                  "WHERE real_folder_id = ? AND file_name = ?",
+                  [datetime.now(), applicationOption["target_extension"], 2,
+                  thisRealFolderId, thisFileName])
+        conn.commit()
+        start = time.time()
+        return
+
+        if subprocess.call(execOptions):
+            runtime = time.time() - start
+            print("Error processing file \"{}\"".format(inpfile))
+            c.execute("UPDATE folder_optimize_file "
+                      "SET file_status = ?, runtime_seconds = ? "
+                      "WHERE real_folder_id = ? AND file_name = ?",
+                      [99, runtime, thisRealFolderId, thisFileName])
+        else:
+            runtime = time.time() - start
+            fileSize = os.path.getsize(outfile)
+            c.execute("UPDATE folder_optimize_file "
+                      "SET file_status = ?, runtime_seconds = ?, "
+                      "    optimized_size = ? "
+                      "WHERE real_folder_id = ? AND file_name = ?",
+                      [1, runtime, fileSize, thisRealFolderId, thisFileName])
+
+        conn.commit()
+
+    else:
+        print("File not found: {}, {}, {}!".format(thisFileName, thisRealFolderName, thisOriginalExtension))
+
+
+def processRealFolder(conn, thisRealFolderId, thisRealFolderName, Options,
+                      applicationOption):
+    """
+    Running within one real folder and process all files
+    """
+    # new cursor here
+    c = conn.cursor()
+
+    c.execute("SELECT file_name, original_extension "
+              "FROM folder_optimize_file "
+              "WHERE real_folder_id = ? AND file_status = ? "
+              "ORDER BY file_name", [thisRealFolderId, 0])
+
+    for thisFileName, thisOriginalExtension in c.fetchall():
+        ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
+                    thisOriginalExtension, Options, applicationOption)
+
+
+def processWatchFolder(conn, thisWatchFolder, defaultOption,
+                       applicationOption):
+    """
+    Now processing one watch folder. Read in folder specific options.
+    Here, we can have several real folders for one watch folder.
+    """
+
+    # new cursor here
+    c = conn.cursor()
+
+    Options = defaultOption
+
+    # need to merge default options with folder Options
+    for key, value in loadFolderOption(c, thisWatchFolder).items():
+        Options[key] = value
+
+    c.execute("SELECT real_folder_id, real_folder_name "
+              "FROM real_folder "
+              "WHERE watch_folder_id = ? "
+              "ORDER BY real_folder_name",
+              [thisWatchFolder])
+
+    for thisRealFolderId, thisRealFolderName in c.fetchall():
+        processRealFolder(conn, thisRealFolderId, thisRealFolderName,
+                          Options, applicationOption)
+
+
+def Execution(databasename):
+    """
+    Reading configuration database and process data in watch folders
+    """
+
+    conn, c = openDatabase(databasename)
+
+    # check of process is already running and exit there if
+    checkExecution(conn, c)
+
+    # read application options
+    applicationOption = loadApplicationOption(conn, c)
+
+    if ("target_extension" not in applicationOption and
+            "target_extension" in default_application_options):
+        applicationOption["target_extension"] = default_application_options[
+                          "target_extension"]
+    elif ("target_extension" not in applicationOption and
+            "target_extension" not in default_application_options):
+        print("Error, cannot go without \"target_extension\" option!")
+        sys.exit(1)
+
+    defaultOption = loadDefaultOption(conn, c)
+
+    c.execute("SELECT watch_folder_id FROM watch_folder "
+              "ORDER BY watch_folder_name")
+    for thisWatchFolder in c.fetchall()[0]:
+        if thisWatchFolder:
+            processWatchFolder(conn, thisWatchFolder, defaultOption,
+                               applicationOption)
+
+    c.execute("DELETE FROM current_running")
 
     conn.commit()
     conn.close()
@@ -657,4 +861,3 @@ if __name__ == '__main__':
         IdentifyNewFiles(databasename)
     elif args.command in ("statistics", "stats", "stat", "s"):
         IdentifyNewFiles(databasename)
-
