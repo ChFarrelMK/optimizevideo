@@ -822,7 +822,8 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                            thisOriginalExtension)
     tgtfile = os.path.join(thisRealFolderName, thisFileName +
                            applicationOption["target_extension"])
-    outfile = os.path.join(thisRealFolderName, thisFileName + ".tmp")
+    outfile = os.path.join(thisRealFolderName, "." + thisFileName + ".tmp." +
+                           applicationOption["target_extension"])
 
     if os.path.isfile(logfile):
         print("Logfile \"{}\" already exists!".format(logfile))
