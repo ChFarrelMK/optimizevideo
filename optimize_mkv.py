@@ -820,7 +820,7 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
     logfile = os.path.join(thisRealFolderName, thisFileName + ".log")
     inpfile = os.path.join(thisRealFolderName, thisFileName + "." +
                            thisOriginalExtension)
-    tgtfile = os.path.join(thisRealFolderName, thisFileName +
+    tgtfile = os.path.join(thisRealFolderName, thisFileName + "." +
                            applicationOption["target_extension"])
     outfile = os.path.join(thisRealFolderName, "." + thisFileName + ".tmp." +
                            applicationOption["target_extension"])
