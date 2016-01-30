@@ -835,8 +835,7 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
         print("Target file \"{}\" already exists!".format(tgtfile))
         return
 
-    if os.path.isfile(os.path.join(thisRealFolderName, thisFileName + "." +
-                 thisOriginalExtension)):
+    if os.path.isfile(inpfile):
         for key in sorted(Options):
             if Options[key] == "INPUTFILE":
                 execOptions.append(inpfile)
@@ -889,7 +888,7 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                     try:
                         os.rename(outfile, tgtfile)
                     except:
-                        print("Error, cannot rename temp file to ori file "
+                        print("Error, cannot rename temp file to new file "
                               "\"{}\"!".format(outfile))
                     else:
                         log.close()
