@@ -50,15 +50,16 @@ default_options = [
     (  0, "ffmpeg"),     # program to be executed
     ( 10, "-i"),
     ( 11, "INPUTFILE"),  # is an implicit term to be replaced with input file
-    ( 20, "-c:v"),
-    ( 21, "libx265"),    # HEVC
-    ( 30, "-crf"),
-    ( 31, "20"),         # high quality
-    ( 40, "-c:a"),
-    ( 41, "copy"),
-    ( 50, "-map"),
-    ( 51, "0"),
-    (100, "OUTPUTFILE") # is an implicit term to be replaced with output file
+    ( 20, "-map"),
+    ( 21, "0"),
+    ( 30, "-c"),
+    ( 31, "copy"),       # standard operation is to copy streams
+    ( 40, "-c:v"),
+    ( 41, "libx265"),    # but reencode video stream as HEVC
+    ( 50, "-crf"),
+    ( 51, "20"),         # high quality
+    ( 60, "-dn"),        # issues in ffmpeg with data streams => ignore them
+    (999, "OUTPUTFILE")  # is an implicit term to be replaced with output file
 ]
 
 # Define initial default values for application
@@ -907,13 +908,23 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                                                    thisOriginalExtension))
 
 
-def processRealFolder(conn, thisRealFolderId, thisRealFolderName, Options,
-                      applicationOption):
+def processRealFolder(conn, thisWatchFolderId, thisRealFolderId,
+                      thisRealFolderName, applicationOption):
     """
     Running within one real folder and process all files
     """
     # new cursor here
     c = conn.cursor()
+
+    # load default options
+    Options = loadDefaultOption(conn, c)
+
+    # need to merge default options with folder Options
+    for key, value in loadFolderOption(c, thisWatchFolderId).items():
+        if value:
+            Options[key] = value
+        elif key in Options:
+            del Options[key]
 
     c.execute("SELECT file_name, original_extension "
               "FROM folder_optimize_file "
@@ -925,8 +936,7 @@ def processRealFolder(conn, thisRealFolderId, thisRealFolderName, Options,
                     thisOriginalExtension, Options, applicationOption)
 
 
-def processWatchFolder(conn, thisWatchFolderId, defaultOption,
-                       applicationOption):
+def processWatchFolder(conn, thisWatchFolderId, applicationOption):
     """
     Now processing one watch folder. Read in folder specific options.
     Here, we can have several real folders for one watch folder.
@@ -935,15 +945,6 @@ def processWatchFolder(conn, thisWatchFolderId, defaultOption,
     # new cursor here
     c = conn.cursor()
 
-    Options = defaultOption
-
-    # need to merge default options with folder Options
-    for key, value in loadFolderOption(c, thisWatchFolderId).items():
-        if value:
-            Options[key] = value
-        elif key in Options:
-            del Options[key]
-
     c.execute("SELECT real_folder_id, real_folder_name "
               "FROM real_folder "
               "WHERE watch_folder_id = ? "
@@ -951,8 +952,8 @@ def processWatchFolder(conn, thisWatchFolderId, defaultOption,
               [thisWatchFolderId])
 
     for thisRealFolderId, thisRealFolderName in c.fetchall():
-        processRealFolder(conn, thisRealFolderId, thisRealFolderName,
-                          Options, applicationOption)
+        processRealFolder(conn, thisWatchFolderId, thisRealFolderId,
+                          thisRealFolderName, applicationOption)
 
 
 def Execution(databasename):
@@ -977,14 +978,11 @@ def Execution(databasename):
         print("Error, cannot go without \"target_extension\" option!")
         sys.exit(1)
 
-    defaultOption = loadDefaultOption(conn, c)
-
     c.execute("SELECT watch_folder_id FROM watch_folder "
               "ORDER BY watch_folder_name")
     for thisWatchFolderId in c.fetchall()[0]:
         if thisWatchFolderId:
-            processWatchFolder(conn, thisWatchFolderId, defaultOption,
-                               applicationOption)
+            processWatchFolder(conn, thisWatchFolderId, applicationOption)
 
     c.execute("DELETE FROM current_running")
 
