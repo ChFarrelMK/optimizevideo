@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!python3
 
 ##########################################################################
 #    optimize_mkv.py
@@ -186,10 +186,11 @@ def InitializeDatabase(databasename):
               "(real_folder_id) ON DELETE CASCADE ON UPDATE CASCADE, "
               "file_name TEXT NOT NULL, original_extension TEXT NOT NULL, "
               "original_size UNSIGNED BIGINT NOT NULL, "
+              "original_file_date TEXT NOT NULL, "
               "original_first_seen_at TEXT NOT NULL, "
               "optimization_started_at TEXT, optimized_extension TEXT, "
-              "optimized_size UNSIGNED BIGINT, runtime_seconds INTEGER, "
-              "file_status TINYINT NOT NULL, "
+              "optimized_size UNSIGNED BIGINT, optimized_file_date TEXT, "
+              "runtime_seconds INTEGER, file_status TINYINT NOT NULL, "
               "PRIMARY KEY (real_folder_id, file_name))")
     c.execute("CREATE TABLE folder_option ("
               "watch_folder_id INTEGER NOT NULL REFERENCES watch_folder "
@@ -496,9 +497,11 @@ def markFileAsDone(c, real_folder_id, thisFolder, File):
 
     if (File.split(".")[-1] in args.add_extension_as_done
             and not File.startswith(".")):
+        absolutFile = os.path.join(thisFolder, File)
         fileName = os.path.splitext(File)[0]
         fileExt  = os.path.splitext(File)[1][1:]
-        fileSize = os.path.getsize(os.path.join(thisFolder, File))
+        fileSize = os.path.getsize(absolutFile)
+        fileDate = datetime.fromtimestamp(os.path.getmtime(absolutFile))
 
         c.execute("SELECT 1, file_status "
                   "FROM folder_optimize_file "
@@ -508,30 +511,27 @@ def markFileAsDone(c, real_folder_id, thisFolder, File):
         if not get:
             c.execute("INSERT INTO folder_optimize_file ("
                       "real_folder_id, file_name, "
-                      "original_extension, original_size, "
+                      "original_extension, original_size, original_file_date, "
                       "original_first_seen_at, "
                       "optimization_started_at, "
                       "optimized_extension, optimized_size, "
-                      "runtime_seconds, file_status) "
-                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                                 [real_folder_id, fileName,
-                                        fileExt, fileSize,
-                                        datetime.now(),
-                                        datetime.now(), fileExt,
-                                        fileSize, -1, 1])
+                      "optimized_file_date, runtime_seconds, file_status) "
+                      "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                      [real_folder_id, fileName, fileExt, fileSize, fileDate,
+                      datetime.now(), datetime.now(), fileExt, fileSize,
+                      fileDate, -1, 1])
             print("Added file \"{}\" to folder \"{}\" as done"
                   .format(File, thisFolder))
         elif get[0] == 1 and get[1] == 0:
             c.execute("UPDATE folder_optimize_file "
                       "SET optimization_started_at = ?,"
                       "optimized_extension = ?,"
-                      "optimized_size = ?, runtime_seconds = ?,"
-                      "file_status = ? "
+                      "optimized_size = ?, optimized_file_date = ?, "
+                      "runtime_seconds = ?, file_status = ? "
                       "WHERE real_folder_id = ? "
-                      "AND file_name = ?", [datetime.now(),
-                                            fileExt, fileSize, -1,
-                                            1, real_folder_id,
-                                                    fileName])
+                      "AND file_name = ?",
+                      [datetime.now(), fileExt, fileSize, fileDate, -1, 1,
+                      real_folder_id, fileName])
             print("File \"{}\" in folder \"{}\" changed to "
                   "optimized".format(File, thisFolder))
         else:
@@ -692,25 +692,28 @@ def IdentifyNewFiles(databasename):
             ignoreExtensions.append(row2[0])
 
         for File in os.listdir(thisRealFolderName):
+            absolutFile = os.path.join(thisRealFolderName, File)
+
             if (os.path.splitext(File)[1][1:] not in ignoreExtensions
                     and not File.startswith(".")
-                    and os.path.isfile(os.path.join(thisRealFolderName, File))):
+                    and os.path.isfile(absolutFile)):
                 c.execute("SELECT 1 FROM folder_optimize_file "
                           "WHERE real_folder_id = ? AND file_name = ?",
                           [thisRealFolderId, os.path.splitext(File)[0]])
                 if not c.fetchone():
-                    fileSize = os.path.getsize(os.path.join(thisRealFolderName,
-                                                            File))
+                    fileSize = os.path.getsize(absolutFile)
+                    fileDate = datetime.fromtimestamp(os.path.getmtime(absolutFile))
                     try:
                         c.execute("INSERT INTO folder_optimize_file ("
                                   "real_folder_id, file_name, "
                                   "original_extension, "
                                   "original_first_seen_at, original_size, "
-                                  "file_status) VALUES (?, ?, ?, ?, ?, ?)",
+                                  "original_file_date, file_status) "
+                                  "VALUES (?, ?, ?, ?, ?, ?, ?)",
                                   [thisRealFolderId, os.path.splitext(File)[0],
                                     os.path.splitext(File)[1][1:],
                                     datetime.now(),
-                                    fileSize, 0])
+                                    fileSize, fileDate, 0])
                     except sqlite3.IntegrityError as e:
                         print("Ho, foreign key to real folder violated! "
                               "Deleted in the meantime?")
@@ -873,11 +876,12 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
             else:
                 runtime = time.time() - start
                 fileSize = os.path.getsize(outfile)
+                fileDate = datetime.fromtimestamp(os.path.getmtime(outfile))
                 c.execute("UPDATE folder_optimize_file "
                           "SET file_status = ?, runtime_seconds = ?, "
-                          "    optimized_size = ? "
+                          "    optimized_size = ?, optimized_file_date = ? "
                           "WHERE real_folder_id = ? AND file_name = ?",
-                          [1, runtime, fileSize, thisRealFolderId,
+                          [1, runtime, fileSize, fileDate, thisRealFolderId,
                              thisFileName])
 
                 try:
