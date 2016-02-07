@@ -19,13 +19,13 @@
 ##########################################################################
 
 # This is basically a rewrite of optimize_mkv.sh as Python, but with
-# enhancedment of using a configuration file (sqlite3) to watch on folders
+# enhancement of using a configuration file (sqlite3) to watch on folders
 # and maintain already processed files with statistics.
 # It can be regularily started to automatically find new files in folders
 # and optimize them.
 #
 # Main purpose:
-# 1. Look for files with "mkv" extension in configured folders
+# 1. Look for files in configured folders
 # 2. Use ffmpeg to convert it into a more optimized codec (configurable)
 # 3. All audio tracks are copied as they are
 # 4. Only video track will be optimized
@@ -35,12 +35,11 @@
 # in the repository database manually, be careful to enable foreign keys
 # first. Otherwise you might get inconsistent data.
 # Default in sqlite3 is usually with deactived foreign keys!!!
-# But under no circumstance, change definition of existing tables!!!
+# Don't change definition of existing tables unless you know what you do!!!
 
 
 # set current repository version to be able to migrate tables from
 # older repositories
-# Do not change this value unless you know what you're doing
 current_repository_version = 1
 
 # Define initial default values for process command with options
