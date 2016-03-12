@@ -847,7 +847,6 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
             else:
                 execOptions.append(Options[key])
 
-        print(execOptions)
         c.execute("UPDATE folder_optimize_file "
                   "SET optimization_started_at = ?, "
                   "    optimized_extension = ?, "
