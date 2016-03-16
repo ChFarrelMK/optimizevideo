@@ -866,6 +866,7 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
             if subprocess.call(execOptions, stdout=log,
                                stderr=subprocess.STDOUT):
                 runtime = time.time() - start
+                log.close()
                 print("Error processing file \"{}\"".format(inpfile))
                 c.execute("UPDATE folder_optimize_file "
                           "SET file_status = ?, runtime_seconds = ? "
@@ -873,6 +874,7 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                           [99, runtime, thisRealFolderId, thisFileName])
             else:
                 runtime = time.time() - start
+                log.close()
                 fileSize = os.path.getsize(outfile)
                 fileDate = datetime.fromtimestamp(os.path.getmtime(outfile))
                 c.execute("UPDATE folder_optimize_file "
@@ -894,15 +896,13 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                         print("Error, cannot rename temp file to new file "
                               "\"{}\"!".format(outfile))
                     else:
-                        log.close()
                         try:
                             os.remove(logfile)
                         except:
                             print("Error, cannot remove logfile \"{}\"!"
                                   .format(logfile))
 
-        log.close()
-        conn.commit()
+            conn.commit()
 
     else:
         print("File not found: {}, {}, {}!".format(thisFileName,
