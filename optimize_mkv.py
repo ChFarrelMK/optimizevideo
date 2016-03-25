@@ -841,7 +841,7 @@ def databaseMigration(conn, oldVersion):
         else:
             c.execute("UPDATE repository_version SET version_number = 2")
 
-    c.commit()
+    conn.commit()
 
 
 def openDatabase(databasename):
@@ -1005,7 +1005,7 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                   [datetime.now(), applicationOption["target_extension"], 2,
                   thisRealFolderId, thisFileName])
         writeActivityLog(conn, "Start processing file {} in folder {}"
-                         .format(File, thisRealFolderName))
+                         .format(thisFileName, thisRealFolderName))
 
         start = time.time()
 
@@ -1077,11 +1077,6 @@ def processRealFolder(conn, thisWatchFolderId, thisRealFolderId,
 
     c = conn.cursor()
 
-    writeActivityLog(conn, "Started processing folder {}"
-                     .format(thisRealFolderName))
-
-    c.commit()
-
     # load default options
     Options = loadDefaultOption(conn)
 
@@ -1101,10 +1096,7 @@ def processRealFolder(conn, thisWatchFolderId, thisRealFolderId,
         ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                     thisOriginalExtension, Options, applicationOption)
 
-    writeActivityLog(conn, "Finished processing folder {}"
-                     .format(thisRealFolderName))
-
-    c.commit()
+    conn.commit()
 
     c.close()
 
@@ -1140,6 +1132,8 @@ def Execution(databasename):
 
     # read application options
     applicationOption = loadApplicationOption(conn)
+
+    c = conn.cursor()
 
     if ("target_extension" not in applicationOption and
             "target_extension" in default_application_options):
