@@ -223,6 +223,7 @@ def InitializeDatabase(databasename):
     for key, value in default_application_options.items():
         c.execute("INSERT INTO application_option VALUES (?, ?)", (key, value))
         print("Added application option \"{}\" = \"{}\"".format(key, value))
+
     conn.commit()
     conn.close()
 
@@ -773,7 +774,7 @@ def IdentifyNewFiles(databasename):
     c.execute("SELECT real_folder_id, watch_folder_id, real_folder_name "
               "FROM real_folder")
 
-    watchFolders = c.fetchall();
+    watchFolders = c.fetchall()
 
     for thisRealFolderId, thisWatchFolderId, thisRealFolderName in watchFolders:
         ignoreExtensions = []
@@ -842,6 +843,7 @@ def databaseMigration(conn, oldVersion):
             c.execute("UPDATE repository_version SET version_number = 2")
 
     conn.commit()
+    c.close()
 
 
 def openDatabase(databasename):
@@ -901,7 +903,6 @@ def checkExecution(conn):
               "(?, ?)", [datetime.now(), os.getpid()])
 
     conn.commit()
-
     c.close()
 
 
@@ -954,7 +955,6 @@ def writeActivityLog(conn, message):
               [datetime.now(), message])
 
     conn.commit()
-
     c.close()
 
 
@@ -980,7 +980,7 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
         writeActivityLog(conn, "Logfile {} already exists!".format(logfile))
         return
     if os.path.isfile(outfile):
-        writeActivityLog(conn, "Temporary file {}\ already exists!"
+        writeActivityLog(conn, "Temporary file {} already exists!"
                          .format(outfile))
         return
     if os.path.isfile(tgtfile) and inpfile != tgtfile:
@@ -1097,7 +1097,6 @@ def processRealFolder(conn, thisWatchFolderId, thisRealFolderId,
                     thisOriginalExtension, Options, applicationOption)
 
     conn.commit()
-
     c.close()
 
 
@@ -1118,6 +1117,8 @@ def processWatchFolder(conn, thisWatchFolderId, applicationOption):
     for thisRealFolderId, thisRealFolderName in c.fetchall():
         processRealFolder(conn, thisWatchFolderId, thisRealFolderId,
                           thisRealFolderName, applicationOption)
+
+    c.close()
 
 
 def Execution(databasename):
@@ -1141,15 +1142,15 @@ def Execution(databasename):
                           "target_extension"]
     elif ("target_extension" not in applicationOption and
             "target_extension" not in default_application_options):
-        writeActivityLog("Error, cannot go without \"target_extension\""
+        writeActivityLog(conn, "Error, cannot go without \"target_extension\""
                          " option!")
         sys.exit(1)
 
     c.execute("SELECT watch_folder_id FROM watch_folder "
               "ORDER BY watch_folder_name")
-    for thisWatchFolderId in c.fetchall()[0]:
-        if thisWatchFolderId:
-            processWatchFolder(conn, thisWatchFolderId, applicationOption)
+    for thisWatchFolderId in c.fetchall():
+        if thisWatchFolderId[0]:
+            processWatchFolder(conn, thisWatchFolderId[0], applicationOption)
 
     c.execute("DELETE FROM current_running")
 
