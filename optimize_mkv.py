@@ -133,6 +133,9 @@ parser_stat = subparsers.add_parser('statistics', aliases=['stats', 'stat',
                                                            's'],
                                     help='Show statistics and analyse '
                                     'repository')
+parser_clean = subparsers.add_parser('cleanup', aliases=['cleanup', 'clean',
+                                                        'u'],
+                                    help='Cleanup and sync database with files')
 args = parser.parse_args()
 
 
@@ -745,6 +748,9 @@ def IdentifyNewRealFolders(conn):
               "recursive_yn FROM watch_folder")
     watchFolders = c.fetchall()
     for row in watchFolders:
+        if not os.path.exists(row[1]):
+            continue
+
         if row[2] == 0:
             InsertNewRealFolder(conn, row[0], row[1])
         elif row[2] == 1:
@@ -1121,6 +1127,166 @@ def processRealFolder(conn, thisWatchFolderId, thisRealFolderId,
     c.close()
 
 
+def Cleanup(databasename):
+    """
+    Clean all real folders
+    """
+
+    conn = openDatabase(databasename)
+    c = conn.cursor()
+    c.execute("PRAGMA FOREIGN_KEYS = ON")
+
+    writeActivityLog(conn, "Started Cleanup")
+
+    conn.commit()
+
+    cleanedStatus = 0
+    deletedStatus = 0
+
+    c.execute("SELECT fof.real_folder_id, rf.real_folder_name, fof.file_name, "
+              "fof.original_extension, "
+              "fof.original_file_date, fof.original_size "
+              "FROM folder_optimize_file as fof "
+              "JOIN real_folder as rf "
+              "ON rf.real_folder_id = fof.real_folder_id "
+              "WHERE fof.file_status = 0")
+
+    for (thisRealFolderId, thisRealFolderName, thisFileName,
+        thisOriginalExtension, thisOriginalFileDate,
+        thisOriginalSize) in c.fetchall():
+
+        check_file = os.path.join(thisRealFolderName, thisFileName + "." +
+                     thisOriginalExtension)
+
+        if not os.path.exists(check_file):
+            deletedStatus += 1
+            print("{}|{}|{}".format(check_file, thisOriginalSize, thisOriginalFileDate))
+            c.execute("DELETE FROM folder_optimize_file "
+                      "WHERE real_folder_id = ? "
+                      "AND file_name = ?", [thisRealFolderId, thisFileName])
+        else:
+            fileSize = os.path.getsize(check_file)
+            fileDate = datetime.fromtimestamp(os.path.getmtime(check_file)).strftime("%Y-%m-%d %H:%M:%S")
+            if (fileSize != thisOriginalSize or
+                fileDate != thisOriginalFileDate):
+                cleanedStatus += 1
+                print("{}|{}|{}|{}|{}".format(check_file, fileSize, thisOriginalSize, fileDate, thisOriginalFileDate))
+                c.execute("UPDATE folder_optimize_file "
+                          "SET original_extension = ?, original_size = ?, "
+                          "original_file_date = ? "
+                          "WHERE real_folder_id = ? "
+                          "AND file_name = ?", [thisOriginalExtension,
+                          fileSize, fileDate, thisRealFolderId,
+                          thisFileName])
+
+    if cleanedStatus > 0 or deletedStatus > 0:
+        writeActivityLog(conn, "Cleanup updated {} and deleted {} from "
+                         "unprocessed files"
+                         .format(cleanedStatus, deletedStatus))
+
+    conn.commit()
+
+    cleanedStatus = 0
+    deletedStatus = 0
+
+    c.execute("SELECT fof.real_folder_id, rf.real_folder_name, fof.file_name, "
+              "fof.original_extension, fof.optimized_extension, "
+              "fof.optimized_file_date, fof.optimized_size "
+              "FROM folder_optimize_file as fof "
+              "JOIN real_folder as rf "
+              "ON rf.real_folder_id = fof.real_folder_id "
+              "WHERE fof.file_status = 1")
+
+    for (thisRealFolderId, thisRealFolderName, thisFileName,
+        thisOriginalExtension, thisOptimizedExtension, thisOptimizedFileDate,
+        thisOptimizedSize) in c.fetchall():
+
+        check_file = os.path.join(thisRealFolderName, thisFileName + "." +
+                     thisOptimizedExtension)
+
+        if not os.path.exists(check_file):
+            deletedStatus += 1
+            print("{}|{}|{}".format(check_file, thisOptimizedSize, thisOptimizedFileDate))
+            c.execute("DELETE FROM folder_optimize_file "
+                      "WHERE real_folder_id = ? "
+                      "AND file_name = ?", [thisRealFolderId, thisFileName])
+        else:
+            fileSize = os.path.getsize(check_file)
+            fileDate = datetime.fromtimestamp(os.path.getmtime(check_file)).strftime("%Y-%m-%d %H:%M:%S")
+            if (fileSize != thisOptimizedSize or
+                fileDate != thisOptimizedFileDate):
+                cleanedStatus += 1
+                print("{}|{}|{}|{}|{}".format(check_file, fileSize, thisOptimizedSize, fileDate, thisOptimizedFileDate))
+                c.execute("UPDATE folder_optimize_file "
+                          "SET original_extension = ?, original_size = ?, "
+                          "original_file_date = ?, file_status = ?, "
+                          "optimized_size = null, optimized_extension = null, "
+                          "optimized_file_date = null, "
+                          "optimization_started_at = null, "
+                          "runtime_seconds = null "
+                          "WHERE real_folder_id = ? "
+                          "AND file_name = ?", [thisOptimizedExtension,
+                          fileSize, fileDate, 0, thisRealFolderId,
+                          thisFileName])
+
+    if cleanedStatus > 0 or deletedStatus > 0:
+        writeActivityLog(conn, "Cleanup updated {} and deleted {} from already "
+                         "processed files"
+                         .format(cleanedStatus, deletedStatus))
+
+    conn.commit()
+
+    cleanedStatus = 0
+    deletedStatus = 0
+
+    c.execute("SELECT fof.real_folder_id, rf.real_folder_name, fof.file_name, "
+              "fof.original_extension "
+              "FROM folder_optimize_file as fof "
+              "JOIN real_folder as rf "
+              "ON rf.real_folder_id = fof.real_folder_id "
+              "WHERE file_status = 99")
+
+    for (thisRealFolderId, thisRealFolderName, thisFileName,
+        thisOriginalExtension) in c.fetchall():
+
+        check_file1 = os.path.join(thisRealFolderName, thisFileName) + ".log"
+        check_file2 = os.path.join(thisRealFolderName, thisFileName + "." +
+                      thisOriginalExtension)
+
+        if not os.path.exists(check_file1):
+            cleanedStatus += 1
+            print("{}|{}|{}|{}|{}".format(check_file, fileSize, thisOriginalSize, fileDate, thisOriginalFileDate))
+            c.execute("UPDATE folder_optimize_file "
+                      "SET original_extension = ?, original_size = ?, "
+                      "original_file_date = ?, file_status = ?, "
+                      "optimized_size = null, optimized_extension = null, "
+                      "optimized_file_date = null, "
+                      "optimization_started_at = null, "
+                      "runtime_seconds = null "
+                      "WHERE real_folder_id = ? "
+                      "AND file_name = ?", [thisOriginalExtension,
+                      fileSize, fileDate, 0, thisRealFolderId,
+                      thisFileName])
+        elif not os.path.exists(check_file2):
+            deletedStatus += 1
+            print("{}|{}|{}".format(check_file, thisOptimizedSize, thisOptimizedFileDate))
+            c.execute("DELETE FROM folder_optimize_file "
+                      "WHERE real_folder_id = ? "
+                      "AND file_name = ?", [thisRealFolderId, thisFileName])
+
+    if cleanedStatus > 0 or deletedStatus > 0:
+        writeActivityLog(conn, "Cleanup updated {} and deleted {} from "
+                         "previously failed files"
+                         .format(cleanedStatus, deletedStatus))
+
+    conn.commit()
+
+    writeActivityLog(conn, "Finished Cleanup")
+
+    conn.commit()
+    conn.close()
+
+
 def processWatchFolder(conn, thisWatchFolderId, applicationOption):
     """
     Now processing one watch folder. Read in folder specific options.
@@ -1184,12 +1350,16 @@ if __name__ == '__main__':
         InitializeDatabase(databasename)
 
     if args.command in ("execute", "exec", "e", "run", "r"):
+        Cleanup(databasename)
         IdentifyNewFiles(databasename)
         Execution(databasename)
     elif args.command in ("configure", "config", "conf", "c"):
         Configuration(databasename)
         IdentifyNewFiles(databasename)
     elif args.command in ("statistics", "stats", "stat", "s"):
+        IdentifyNewFiles(databasename)
+    elif args.command in ("cleanup", "clean", "u"):
+        Cleanup(databasename)
         IdentifyNewFiles(databasename)
     else:
         IdentifyNewFiles(databasename)
