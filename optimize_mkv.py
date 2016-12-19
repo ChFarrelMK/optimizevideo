@@ -40,7 +40,7 @@
 
 # set current repository version to be able to migrate tables from
 # older repositories
-current_repository_version = 2
+current_repository_version = 3
 
 # Define initial default values for process command with options
 # Use unique number to indicate the specific options
@@ -570,7 +570,7 @@ def markFileAsDone(conn, real_folder_id, thisFolder, File):
         fileName = os.path.splitext(File)[0]
         fileExt  = os.path.splitext(File)[1][1:]
         fileSize = os.path.getsize(absolutFile)
-        fileDate = datetime.fromtimestamp(os.path.getmtime(absolutFile))
+        fileDate = datetime.fromtimestamp(os.path.getmtime(absolutFile)).strftime("%Y-%m-%d %H:%M:%S")
 
         c.execute("SELECT 1, file_status "
                   "FROM folder_optimize_file "
@@ -779,6 +779,9 @@ def IdentifyNewFiles(databasename):
     for thisRealFolderId, thisWatchFolderId, thisRealFolderName in watchFolders:
         ignoreExtensions = []
 
+        if not os.path.exists(thisRealFolderName):
+            continue
+
         for row2 in c.execute("SELECT ignore_extension "
                               "FROM folder_ignore_extension "
                               "WHERE watch_folder_id = ?",
@@ -796,7 +799,7 @@ def IdentifyNewFiles(databasename):
                           [thisRealFolderId, os.path.splitext(File)[0]])
                 if not c.fetchone():
                     fileSize = os.path.getsize(absolutFile)
-                    fileDate = datetime.fromtimestamp(os.path.getmtime(absolutFile))
+                    fileDate = datetime.fromtimestamp(os.path.getmtime(absolutFile)).strftime("%Y-%m-%d %H:%M:%S")
                     try:
                         c.execute("INSERT INTO folder_optimize_file ("
                                   "real_folder_id, file_name, "
@@ -841,6 +844,24 @@ def databaseMigration(conn, oldVersion):
             sys.exit(1)
         else:
             c.execute("UPDATE repository_version SET version_number = 2")
+
+    if oldVersion < 3:
+        try:
+            c.execute("UPDATE folder_optimize_file "
+                      "SET optimized_file_date = SUBSTR(optimized_file_date, 1,"
+                      "19), original_file_date = SUBSTR(original_file_date, 1,"
+                      "19) "
+                      "WHERE length(optimized_file_date) > 19 "
+                      "OR length(original_file_date) > 19")
+        except:
+            print("Error migrating to repository version 3")
+            sys.exit(1)
+        else:
+            c.execute("UPDATE repository_version SET version_number = 3")
+
+    writeActivityLog(conn, "Successfully migrated database version from {} "
+                           "to {}".format(oldVersion,
+                                          current_repository_version))
 
     conn.commit()
     c.close()
@@ -1029,7 +1050,7 @@ def ProcessFile(conn, thisRealFolderId, thisRealFolderName, thisFileName,
                 runtime = time.time() - start
                 log.close()
                 fileSize = os.path.getsize(outfile)
-                fileDate = datetime.fromtimestamp(os.path.getmtime(outfile))
+                fileDate = datetime.fromtimestamp(os.path.getmtime(outfile)).strftime("%Y-%m-%d %H:%M:%S")
                 c.execute("UPDATE folder_optimize_file "
                           "SET file_status = ?, runtime_seconds = ?, "
                           "    optimized_size = ?, optimized_file_date = ? "
