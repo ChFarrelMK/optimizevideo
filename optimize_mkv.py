@@ -1206,7 +1206,6 @@ def Cleanup(databasename):
 
         if not os.path.exists(check_file):
             deletedStatus += 1
-            print("{}|{}|{}".format(check_file, thisOptimizedSize, thisOptimizedFileDate))
             c.execute("DELETE FROM folder_optimize_file "
                       "WHERE real_folder_id = ? "
                       "AND file_name = ?", [thisRealFolderId, thisFileName])
@@ -1216,7 +1215,6 @@ def Cleanup(databasename):
             if (fileSize != thisOptimizedSize or
                 fileDate != thisOptimizedFileDate):
                 cleanedStatus += 1
-                print("{}|{}|{}|{}|{}".format(check_file, fileSize, thisOptimizedSize, fileDate, thisOptimizedFileDate))
                 c.execute("UPDATE folder_optimize_file "
                           "SET original_extension = ?, original_size = ?, "
                           "original_file_date = ?, file_status = ?, "
@@ -1255,7 +1253,6 @@ def Cleanup(databasename):
 
         if not os.path.exists(check_file1):
             cleanedStatus += 1
-            print("{}|{}|{}|{}|{}".format(check_file, fileSize, thisOriginalSize, fileDate, thisOriginalFileDate))
             c.execute("UPDATE folder_optimize_file "
                       "SET original_extension = ?, original_size = ?, "
                       "original_file_date = ?, file_status = ?, "
@@ -1269,7 +1266,6 @@ def Cleanup(databasename):
                       thisFileName])
         elif not os.path.exists(check_file2):
             deletedStatus += 1
-            print("{}|{}|{}".format(check_file, thisOptimizedSize, thisOptimizedFileDate))
             c.execute("DELETE FROM folder_optimize_file "
                       "WHERE real_folder_id = ? "
                       "AND file_name = ?", [thisRealFolderId, thisFileName])
