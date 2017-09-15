@@ -1212,8 +1212,7 @@ def Cleanup(databasename):
         else:
             fileSize = os.path.getsize(check_file)
             fileDate = datetime.fromtimestamp(os.path.getmtime(check_file)).strftime("%Y-%m-%d %H:%M:%S")
-            if (fileSize != thisOptimizedSize or
-                fileDate != thisOptimizedFileDate):
+            if (abs(thisOptimizedSize - fileSize) * 100 / thisOptimizedSize > 10):
                 cleanedStatus += 1
                 c.execute("UPDATE folder_optimize_file "
                           "SET original_extension = ?, original_size = ?, "
