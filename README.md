@@ -1,25 +1,9 @@
-# extract_titles_from_iso.sh
-Processes ISO files (DVD rips) and extracts every single title into a separate mp4 file.
-And this is done with the command line interface to Handbrake.
-It has been developed under Linux, and is working perfectly fine there.
+# other_tools
 
-What you still need to do is to rename the generated files to a useful name.
-Also, the folder requires some cleanup afterwards.
-
-The target name will be automatically generated. If it already exists, processing for this will be skipped.
-If you want to reprocess it, then you need to remove the target file manually.
-
-It was intended for separating episodes of TV series into single files with following features/requirements:
-- Execution without GUI
-- Automatically process all titles in an ISO file
-- Extract all audio tracks per title as they are
-- Video will be encoded in h264 in very good quality
-- Do as much as possible automatically
-- Use an existing established software for the video processing
-
-If you know, what you are doing, you can tweak the options used for Handbrake
+Subfolder for other small independent tools around video processing.
 
 # optimize_mkv.sh
+
 Look for files with "mkv" extension in current folder.
 Or give a list of files.
 Use ffmpeg to convert it into a more optimized (eg. H264) codec.
@@ -33,11 +17,13 @@ There are two paramters to control the output (quality and size):
 Change the script or set those environment variables to a different value
 
 # optimize_mkv.py
-This is a rewrite of optimize_mkv.sh in python with same features plus the
+
+This is a rewrite of optimize_mkv.sh in python with same features plus this
 intended additional functionality:
+
 - Using a sqlite3 database to keep configuration
   - Setup watch folders, so one invocation can scan folders if new files
     arrived
   - Keeping track and statistics of processed files
   - Configuration
-- Single script
+- Still single script
