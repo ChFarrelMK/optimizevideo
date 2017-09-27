@@ -62,7 +62,5 @@ do
                 echo "File ${BASEDIR%.*}_${TITLE}.${CONTAINER_EXT} error. Look at (${BASEDIR%.*}_${TITLE}.log)" >>all.${PPID}.log
             fi
         fi
-        exit
     done
 done
-
