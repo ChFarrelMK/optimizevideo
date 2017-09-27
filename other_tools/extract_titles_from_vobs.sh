@@ -28,17 +28,19 @@ LANGUAGES="eng,deu"
 
 for BASEDIR in *
 do
-    if [ ! -d "${BASEDIR}/VIDEO_TS" ]
+    if [ ! -d "${BASEDIR}"/[Vv][Ii][Dd][Ee][Oo]_[Tt][Ss] ]
     then
         continue
+    else
+        FO=$(ls -1d "${BASEDIR}"/[Vv][Ii][Dd][Ee][Oo]_[Tt][Ss] 2>/dev/null)
     fi
 
-    TITLES=$(HandBrakeCLI -i "${BASEDIR}"/[Vv][Ii][Dd][Ee][Oo]_[Tt][Ss] -t 0 2>&1 | awk '/scan: DVD has [0-9]+ title/ {print $5}')
+    TITLES=$(HandBrakeCLI -i "${FO}" -t 0 2>&1 | awk '/scan: DVD has [0-9]+ title/ {print $5}')
     for (( TITLE=1; TITLE <= TITLES; TITLE++ ))
     do
         if [ ! -e "${BASEDIR%.*}_${TITLE}.${CONTAINER_EXT}" ]
         then
-            HandBrakeCLI -i "${BASEDIR}/VIDEO_TS" \
+            HandBrakeCLI -i "${FO}" \
                          -o "${BASEDIR%.*}_${TITLE}.${CONTAINER_EXT}" \
                          -t ${TITLE} \
                          -m \
