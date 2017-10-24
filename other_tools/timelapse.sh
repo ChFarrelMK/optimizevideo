@@ -13,13 +13,14 @@ function generateStills() {
     typeset -i NUM
     NUM=0
 
+    # for prefixing the running number with zeroes
     zeroes="000000000"
 
     # generate stills
-    for X in "${thisDIR}"/*.{mp4,m4v,mkv}
+    find "${thisDIR}" \( -type f -o -type l \) | egrep -i "(mp4|m4v|mkv|mpg)$" | sort | while read X
     do
         pad="${zeroes}${NUM}"
-        ffmpeg -i "${X}" -r 1 -f image2 -vsync cfr "${DIR}.ffmpeg_temp"/${pad:(-9)}%05d.png
+        ffmpeg -i "${X}" -r 1 -f image2 -vsync cfr "${thisDIR}.ffmpeg_temp"/${pad:(-9)}%05d.png
         (( NUM = NUM + 1 ))
     done
 
