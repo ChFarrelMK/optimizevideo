@@ -20,7 +20,7 @@ function generateStills() {
     find "${thisDIR}" \( -type f -o -type l \) | egrep -i "(mp4|m4v|mkv|mpg)$" | sort | while read X
     do
         pad="${zeroes}${NUM}"
-        ffmpeg -i "${X}" -r 1 -f image2 -vsync cfr "${thisDIR}.ffmpeg_temp"/${pad:(-9)}%05d.png
+        ffmpeg -i "${X}" -r 1 -f image2 -vsync cfr "${thisDIR}.ffmpeg_temp"/${pad:(-9)}%05d.png </dev/null
         (( NUM = NUM + 1 ))
     done
 
