@@ -53,6 +53,7 @@ do
 
     [ -d "${DIR}" ] || continue
     [ -e "${DIR}.${Extension}" ] && continue
+    [ "${DIR##*.}" == "ffmpeg_temp" ] && continue
 
     if [ -e "${DIR}.ffmpeg_temp" ]
     then
