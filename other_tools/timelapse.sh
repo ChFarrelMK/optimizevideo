@@ -69,7 +69,7 @@ do
 
     if [ ! -e "${DIR}".${Extension} ]
     then
-        ffmpeg -pattern_type glob -i "${DIR}.ffmpeg_temp"'/*.png' -c:v libx264 "${DIR}".${Extension}
+        ffmpeg -pattern_type glob -i "${DIR}.ffmpeg_temp"'/*.png' -c:v libx265 -crf 26 -pix_fmt yuv420p "${DIR}".${Extension}
 
         if [ $? -eq 0 ]
         then
