@@ -67,9 +67,9 @@ do
         generateStills "${DIR}"
     fi
 
-    if [ ! -e "${DIR}".${Extension} ]
+    if [ ! -e "${DIR} Timelapse".${Extension} ]
     then
-        ffmpeg -pattern_type glob -i "${DIR}.ffmpeg_temp"'/*.png' -c:v libx265 -crf 26 -pix_fmt yuv420p "${DIR}".${Extension}
+        ffmpeg -pattern_type glob -i "${DIR}.ffmpeg_temp"'/*.png' -c:v libx265 -crf 26 -pix_fmt yuv420p "${DIR} Timelapse".${Extension}
 
         if [ $? -eq 0 ]
         then
@@ -82,7 +82,7 @@ do
             End 2
         fi
     else
-        ENDmsg="${ENDmsg}Video ${DIR}.${Extension} already available. To regenerate, delete it first.\n"
+        ENDmsg="${ENDmsg}Video ${DIR} Timelapse.${Extension} already available. To regenerate, delete it first.\n"
     fi
 
 done
